@@ -1,0 +1,33 @@
+[package]
+name = "fitgirl-browser"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["multipart"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite"] }
+reqwest = { version = "0.11", features = ["json", "stream"] }
+csv = "1.3"
+chrono = "0.4"
+regex = "1.10"
+futures = "0.3"
+urlencoding = "2.1"
+
+# For downloads
+tokio-util = { version = "0.7", features = ["io"] }
+bytes = "1.5"
+
+# For extraction
+zip = "0.6"
+
+# Windows-specific: hide console window for release builds
+[target.'cfg(windows)'.build-dependencies]
+
+[[bin]]
+name = "fitgirl-browser"
+path = "src/main.rs"

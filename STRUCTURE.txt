@@ -1,0 +1,16 @@
+.
+./run.bat
+./QUICKSTART.md
+./.gitignore
+./frontend
+./frontend/index.html
+./frontend/app.js
+./src
+./src/scraper.rs
+./src/realdebrid.rs
+./src/db.rs
+./src/main.rs
+./BUILD.md
+./Cargo.toml
+./README.md
+./STRUCTURE.txt

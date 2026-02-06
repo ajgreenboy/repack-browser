@@ -1,0 +1,7 @@
+target/
+data/
+downloads/
+*.db
+*.db-journal
+*.db-wal
+.git/
