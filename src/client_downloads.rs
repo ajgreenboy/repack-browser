@@ -78,9 +78,21 @@ impl ClientDownloadManager {
             ).into());
         }
 
+        // Get fresh RD API key from database settings
+        let api_key = db::get_setting(&self.db, "rd_api_key").await
+            .map_err(|e| format!("Failed to load RD API key: {}", e))?
+            .ok_or("Real-Debrid API key not configured. Please add it in Settings.")?;
+
+        if api_key.is_empty() {
+            return Err("Real-Debrid API key is empty. Please configure it in Settings.".into());
+        }
+
+        // Create fresh RD client with database API key
+        let rd_client = RealDebridClient::new(api_key);
+
         // Convert magnet to direct URLs via Real-Debrid
         println!("Converting magnet for game '{}'...", game.title);
-        let download_links = self.rd_client.process_link(&game.magnet_link).await
+        let download_links = rd_client.process_link(&game.magnet_link).await
             .map_err(|e| format!("Real-Debrid conversion failed: {}", e))?;
 
         if download_links.is_empty() {
