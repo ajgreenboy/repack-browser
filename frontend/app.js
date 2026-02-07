@@ -10,9 +10,74 @@ let currentView = 'games'; // 'games' or 'downloads'
 let favoriteIds = new Set();
 let showingFavorites = false;
 let selectedSource = 'all';
+let currentUser = null; // Stores current authenticated user
+
+// ─── Authentication ───
+
+async function checkAuth() {
+    try {
+        const response = await fetch(`${API_BASE}/auth/me`, {
+            credentials: 'include'
+        });
+        const data = await response.json();
+
+        if (data.success && data.user) {
+            currentUser = data.user;
+            updateUserUI();
+            return true;
+        } else {
+            // Not authenticated, redirect to login
+            window.location.href = '/login.html';
+            return false;
+        }
+    } catch (error) {
+        console.error('Auth check failed:', error);
+        window.location.href = '/login.html';
+        return false;
+    }
+}
+
+function updateUserUI() {
+    if (!currentUser) return;
+
+    // Show user info
+    document.getElementById('userName').textContent = currentUser.username;
+    document.getElementById('userInfo').classList.remove('hidden');
+    document.getElementById('logoutBtn').classList.remove('hidden');
+
+    // Show admin badge if admin
+    if (currentUser.is_admin) {
+        document.getElementById('userAdmin').classList.remove('hidden');
+    }
+}
+
+async function handleLogout() {
+    try {
+        const response = await fetch(`${API_BASE}/auth/logout`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            window.location.href = '/login.html';
+        }
+    } catch (error) {
+        console.error('Logout failed:', error);
+        window.location.href = '/login.html';
+    }
+}
 
 // Load games on page load
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // Check authentication first
+    const isAuthenticated = await checkAuth();
+    if (!isAuthenticated) {
+        return; // Will redirect to login
+    }
+
+    // Load app data
     loadGames();
     loadGenres();
     loadFavoriteIds();

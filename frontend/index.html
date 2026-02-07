@@ -38,6 +38,11 @@
         .icon-btn{padding:0.4rem 0.75rem;height:38px;border-radius:9px;background:var(--bg-surface);border:1px solid var(--border);color:var(--text-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:0.775rem;font-weight:500;font-family:inherit;transition:all 0.2s}
         .icon-btn:hover{border-color:var(--border-hover);color:var(--text);background:var(--bg-card)}
         .download-badge{position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;border-radius:50%;min-width:18px;height:18px;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:700;font-family:'JetBrains Mono',monospace}
+        .user-info{display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.875rem;height:38px;border-radius:9px;background:var(--bg-surface);border:1px solid var(--border);color:var(--text);font-size:0.775rem;font-weight:500}
+        .user-info-name{color:var(--accent-bright)}
+        .user-info-admin{background:var(--gold);color:#000;padding:0.125rem 0.375rem;border-radius:4px;font-size:0.65rem;font-weight:700;margin-left:0.25rem}
+        .logout-btn{padding:0.4rem 0.75rem;height:38px;border-radius:9px;background:transparent;border:1px solid var(--border);color:var(--text-muted);cursor:pointer;font-size:0.775rem;font-weight:500;font-family:inherit;transition:all 0.2s}
+        .logout-btn:hover{border-color:var(--red);color:var(--red);background:var(--red-dim)}
 
         /* ── Scrape Progress ── */
         .scrape-progress{margin:0.75rem 1.75rem 0;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1rem 1.25rem}
@@ -177,9 +182,14 @@
         </nav>
         <div class="topbar-spacer"></div>
         <div class="topbar-actions">
+            <div id="userInfo" class="user-info hidden">
+                <span id="userName" class="user-info-name"></span>
+                <span id="userAdmin" class="user-info-admin hidden">ADMIN</span>
+            </div>
             <button onclick="showUploadModal()" class="icon-btn" title="Upload CSV">CSV</button>
             <button id="scrapeBtn" onclick="rescrape()" class="icon-btn" title="Re-scrape site">Scrape</button>
             <button onclick="showSettingsModal()" class="icon-btn" title="Settings">Settings</button>
+            <button id="logoutBtn" onclick="handleLogout()" class="logout-btn hidden" title="Logout">Logout</button>
         </div>
     </header>
 
