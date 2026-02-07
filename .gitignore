@@ -1,5 +1,5 @@
 # Rust
-/target/
+**/target/
 Cargo.lock
 **/*.rs.bk
 
@@ -30,3 +30,6 @@ docker-compose.override.yml
 
 # Claude Code local settings (contains local paths and permissions)
 .claude/
+
+# Downloads directory
+/downloads/
