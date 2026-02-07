@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-use crate::scraper::ScrapeProgress;
+use crate::scrapers::ScrapeProgress;
 
 // ─── RAWG API response types ───
 

@@ -1,5 +1,7 @@
 const API_BASE = '/api';
 let currentPage = 1;
+let totalPages = 1;
+let isLoadingMore = false;
 let selectedGameId = null;
 let searchTimeout = null;
 let statusCheckInterval = null;
@@ -7,6 +9,7 @@ let downloadPollInterval = null;
 let currentView = 'games'; // 'games' or 'downloads'
 let favoriteIds = new Set();
 let showingFavorites = false;
+let selectedSource = 'all';
 
 // Load games on page load
 document.addEventListener('DOMContentLoaded', () => {
@@ -22,12 +25,60 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+// ─── Keyboard Shortcuts ───
+
+document.addEventListener('keydown', (e) => {
+    // Don't trigger shortcuts when typing in inputs
+    const tag = document.activeElement.tagName;
+    const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
+    // Escape: close any open modal
+    if (e.key === 'Escape') {
+        if (!document.getElementById('confirmModal').classList.contains('hidden')) {
+            hideConfirmModal();
+        } else if (!document.getElementById('settingsModal').classList.contains('hidden')) {
+            hideSettingsModal();
+        } else if (!document.getElementById('uploadModal').classList.contains('hidden')) {
+            hideUploadModal();
+        }
+        return;
+    }
+
+    // Arrow keys: screenshot gallery navigation (when modal is open)
+    if (!document.getElementById('confirmModal').classList.contains('hidden') && modalScreenshots.length > 1) {
+        if (e.key === 'ArrowLeft') { e.preventDefault(); prevScreenshot(); return; }
+        if (e.key === 'ArrowRight') { e.preventDefault(); nextScreenshot(); return; }
+    }
+
+    if (isInput) return;
+
+    // / or Ctrl+K: focus search
+    if (e.key === '/' || (e.key === 'k' && (e.metaKey || e.ctrlKey))) {
+        e.preventDefault();
+        document.getElementById('searchInput').focus();
+        return;
+    }
+
+    // r: random game
+    if (e.key === 'r') { randomGame(); return; }
+
+    // f: toggle favorites
+    if (e.key === 'f') { toggleFavoritesView(); return; }
+
+    // 0: home, 1: games view, 2: downloads view
+    if (e.key === '0') { showView('home'); return; }
+    if (e.key === '1') { showView('games'); return; }
+    if (e.key === '2') { showView('downloads'); return; }
+});
+
 // ─── View switching ───
 
 function showView(view) {
     currentView = view;
+    document.getElementById('homeView').classList.toggle('hidden', view !== 'home');
     document.getElementById('gamesView').classList.toggle('hidden', view !== 'games');
     document.getElementById('downloadsView').classList.toggle('hidden', view !== 'downloads');
+    document.getElementById('navHome').classList.toggle('active', view === 'home');
     document.getElementById('navGames').classList.toggle('active', view === 'games');
     document.getElementById('navDownloads').classList.toggle('active', view === 'downloads');
 
@@ -41,8 +92,14 @@ function showView(view) {
 
 // ─── Games ───
 
-async function loadGames(page = 1) {
+async function loadGames(page = 1, append = false) {
+    if (isLoadingMore && append) return;
+
     currentPage = page;
+    if (!append) {
+        isLoadingMore = false;
+    }
+
     const search = document.getElementById('searchInput').value;
     const sort = document.getElementById('sortSelect').value;
     const genre = document.getElementById('genreSelect').value;
@@ -55,8 +112,14 @@ async function loadGames(page = 1) {
     if (search) params.append('search', search);
     if (sort) params.append('sort', sort);
     if (genre) params.append('genre', genre);
+    if (selectedSource) params.append('source', selectedSource);
 
-    showLoading(true);
+    if (!append) {
+        showLoading(true);
+    } else {
+        isLoadingMore = true;
+        showScrollLoader(true);
+    }
     hideError();
 
     try {
@@ -64,27 +127,131 @@ async function loadGames(page = 1) {
         if (!response.ok) throw new Error('Failed to load games');
 
         const data = await response.json();
-        currentGames = data.games || [];
-        renderGames(data.games);
-        renderPagination(data);
+        totalPages = data.total_pages || 1;
+
+        if (append) {
+            currentGames = currentGames.concat(data.games || []);
+            appendGames(data.games || []);
+        } else {
+            currentGames = data.games || [];
+            renderGames(data.games);
+        }
+
         updateStats(data);
 
-        if (data.total === 0) {
+        if (data.total === 0 && !append) {
             document.getElementById('emptyState').classList.remove('hidden');
         } else {
             document.getElementById('emptyState').classList.add('hidden');
         }
+
+        // Refresh genre counts
+        loadGenres();
     } catch (error) {
         showError('Failed to load games. Please try again.');
         console.error('Error loading games:', error);
     } finally {
-        showLoading(false);
+        if (!append) {
+            showLoading(false);
+        } else {
+            isLoadingMore = false;
+            showScrollLoader(false);
+        }
     }
 }
 
 function showLoading(show) {
     document.getElementById('loadingIndicator').classList.toggle('hidden', !show);
     document.getElementById('gamesGrid').classList.toggle('hidden', show);
+}
+
+function showScrollLoader(show) {
+    let loader = document.getElementById('scrollLoader');
+    if (!loader) {
+        loader = document.createElement('div');
+        loader.id = 'scrollLoader';
+        loader.className = 'loading-state';
+        loader.innerHTML = '<div style="text-align:center"><div class="spinner" style="width:28px;height:28px;border-width:3px;"></div></div>';
+        document.getElementById('gamesGrid').parentElement.insertBefore(loader, document.getElementById('pagination'));
+    }
+    loader.classList.toggle('hidden', !show);
+}
+
+function appendGames(games) {
+    const grid = document.getElementById('gamesGrid');
+    if (games.length === 0) return;
+
+    const fragment = document.createDocumentFragment();
+    const temp = document.createElement('div');
+    temp.innerHTML = games.map(game => buildCardHtml(game)).join('');
+    while (temp.firstChild) {
+        fragment.appendChild(temp.firstChild);
+    }
+    grid.appendChild(fragment);
+}
+
+// Infinite scroll observer
+let scrollObserver = null;
+
+function setupScrollObserver() {
+    if (scrollObserver) scrollObserver.disconnect();
+
+    const sentinel = document.getElementById('scrollSentinel');
+    if (!sentinel) return;
+
+    scrollObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && !isLoadingMore && !showingFavorites && currentPage < totalPages) {
+            loadGames(currentPage + 1, true);
+        }
+    }, { rootMargin: '400px' });
+
+    scrollObserver.observe(sentinel);
+}
+
+// Build a single card's HTML (shared by renderGames and appendGames)
+function buildCardHtml(game) {
+    const hasThumb = game.thumbnail_url && game.thumbnail_url.length > 0;
+    const isFav = favoriteIds.has(game.id);
+    const source = game.source || 'fitgirl';
+    const sourceLabel = source === 'steamrip' ? 'SteamRIP' : 'FitGirl';
+    const sourceBadge = `<span class="source-badge ${source}">${sourceLabel}</span>`;
+
+    const thumb = hasThumb
+        ? `<div class="game-thumb"><img src="${escapeHtml(game.thumbnail_url)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('game-thumb-fallback');this.remove()">${sourceBadge}<button onclick="event.stopPropagation();toggleFavorite(${game.id})" class="fav-star" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${isFav ? '⭐' : '☆'}</button></div>`
+        : `<div class="game-thumb game-thumb-fallback"><span>🎮</span>${sourceBadge}<button onclick="event.stopPropagation();toggleFavorite(${game.id})" class="fav-star" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${isFav ? '⭐' : '☆'}</button></div>`;
+
+    const genres = game.genres
+        ? `<div class="card-genres">${escapeHtml(game.genres).split(',').map(g => {
+            const trimmed = g.trim();
+            return `<span onclick="event.stopPropagation();filterByGenre('${trimmed}')" class="genre-tag">${trimmed}</span>`;
+        }).join('')}</div>`
+        : '';
+
+    const company = game.company
+        ? `<div class="card-company">${escapeHtml(game.company)}</div>`
+        : '';
+
+    const year = game.post_date ? game.post_date.substring(0, 4) : '';
+    const yearBadge = year ? `<span class="card-year">${year}</span>` : '';
+
+    const sizes = game.original_size
+        ? `${escapeHtml(game.file_size)} <span class="arrow">→</span> ${escapeHtml(game.original_size)}`
+        : `${escapeHtml(game.file_size)}`;
+
+    return `
+        <div class="game-card ${isFav ? 'favorited' : ''}" onclick="showGameModal(${game.id})">
+            ${thumb}
+            <div class="card-body">
+                <div class="card-header">
+                    <h3 class="card-title">${escapeHtml(game.title)}</h3>
+                    ${yearBadge}
+                </div>
+                ${company}
+                ${genres}
+                <div class="card-size">${sizes}</div>
+            </div>
+        </div>
+    `;
 }
 
 function showError(message) {
@@ -104,97 +271,26 @@ function renderGames(games) {
         return;
     }
 
-    grid.innerHTML = games.map(game => {
-        const hasThumb = game.thumbnail_url && game.thumbnail_url.length > 0;
-        const isFav = favoriteIds.has(game.id);
-        const thumb = hasThumb
-            ? `<div class="game-thumb"><img src="${escapeHtml(game.thumbnail_url)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('game-thumb-fallback');this.remove()"><button onclick="event.stopPropagation();toggleFavorite(${game.id})" class="fav-star" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${isFav ? '⭐' : '☆'}</button></div>`
-            : `<div class="game-thumb game-thumb-fallback"><span>🎮</span><button onclick="event.stopPropagation();toggleFavorite(${game.id})" class="fav-star" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${isFav ? '⭐' : '☆'}</button></div>`;
+    grid.innerHTML = games.map(game => buildCardHtml(game)).join('');
 
-        const genres = game.genres
-            ? `<div class="card-genres">${escapeHtml(game.genres).split(',').map(g => {
-                const trimmed = g.trim();
-                return `<span onclick="event.stopPropagation();filterByGenre('${trimmed}')" class="genre-tag">${trimmed}</span>`;
-            }).join('')}</div>`
-            : '';
-
-        const company = game.company
-            ? `<div class="card-company">${escapeHtml(game.company)}</div>`
-            : '';
-
-        const year = game.post_date ? game.post_date.substring(0, 4) : '';
-        const yearBadge = year ? `<span class="card-year">${year}</span>` : '';
-
-        const sizes = game.original_size
-            ? `${escapeHtml(game.file_size)} <span class="arrow">→</span> ${escapeHtml(game.original_size)}`
-            : `${escapeHtml(game.file_size)}`;
-
-        return `
-            <div class="game-card ${isFav ? 'favorited' : ''}" onclick="showGameModal(${game.id})">
-                ${thumb}
-                <div class="card-body">
-                    <div class="card-header">
-                        <h3 class="card-title">${escapeHtml(game.title)}</h3>
-                        ${yearBadge}
-                    </div>
-                    ${company}
-                    ${genres}
-                    <div class="card-size">${sizes}</div>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-function renderPagination(data) {
-    const pagination = document.getElementById('pagination');
-    const { page, total_pages } = data;
-
-    if (total_pages <= 1) {
-        pagination.innerHTML = '';
-        return;
-    }
-
-    let html = '';
-
-    if (page > 1) {
-        html += `<button onclick="loadGames(${page - 1})" class="page-btn">← Prev</button>`;
-    }
-
-    const startPage = Math.max(1, page - 2);
-    const endPage = Math.min(total_pages, page + 2);
-
-    if (startPage > 1) {
-        html += `<button onclick="loadGames(1)" class="page-btn">1</button>`;
-        if (startPage > 2) html += `<span class="page-ellipsis">…</span>`;
-    }
-
-    for (let i = startPage; i <= endPage; i++) {
-        const isActive = i === page;
-        html += `<button onclick="loadGames(${i})" class="page-btn ${isActive ? 'active' : ''}">${i}</button>`;
-    }
-
-    if (endPage < total_pages) {
-        if (endPage < total_pages - 1) html += `<span class="page-ellipsis">…</span>`;
-        html += `<button onclick="loadGames(${total_pages})" class="page-btn">${total_pages}</button>`;
-    }
-
-    if (page < total_pages) {
-        html += `<button onclick="loadGames(${page + 1})" class="page-btn">Next →</button>`;
-    }
-
-    pagination.innerHTML = html;
+    // Setup infinite scroll after render
+    requestAnimationFrame(() => setupScrollObserver());
 }
 
 function updateStats(data) {
-    const stats = document.getElementById('statsText');
-    stats.textContent = `Showing ${data.games.length} of ${data.total} games (Page ${data.page} of ${data.total_pages})`;
+    const loaded = currentGames.length;
+    const total = data.total;
+    const text = loaded < total
+        ? `${loaded} of ${total} games loaded`
+        : `${total} game${total !== 1 ? 's' : ''}`;
+    document.getElementById('statsText').textContent = text;
 }
 
 function handleSearchChange() {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => {
         currentPage = 1;
+        currentGames = [];
         loadGames();
     }, 500);
 }
@@ -203,9 +299,25 @@ function clearFilters() {
     document.getElementById('searchInput').value = '';
     document.getElementById('sortSelect').value = '';
     document.getElementById('genreSelect').value = '';
+    setSource('all');
     showingFavorites = false;
     document.getElementById('favToggle').classList.remove('bg-yellow-700');
     currentPage = 1;
+    currentGames = [];
+    loadGames();
+}
+
+function setSource(source) {
+    selectedSource = source;
+
+    // Update active button states
+    document.querySelectorAll('.source-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.source === source);
+    });
+
+    // Reload games with new source filter
+    currentPage = 1;
+    currentGames = [];
     loadGames();
 }
 
@@ -233,21 +345,20 @@ function showGameModal(gameId) {
     }
 
     const galleryHtml = modalScreenshots.length > 0 ? `
-        <div class="relative mb-3 bg-gray-900 rounded overflow-hidden">
-            <img id="modalScreenshot" src="${escapeHtml(modalScreenshots[0])}" alt="" class="w-full max-h-64 object-contain" onerror="this.style.display='none'">
+        <div style="position:relative;margin-bottom:0.75rem;background:var(--bg-deep);border-radius:10px;overflow:hidden">
+            <img id="modalScreenshot" src="${escapeHtml(modalScreenshots[0])}" alt="" style="width:100%;max-height:16rem;object-fit:contain;display:block" onerror="this.style.display='none'">
             ${modalScreenshots.length > 1 ? `
-                <button onclick="prevScreenshot()" class="absolute left-1 top-1/2 -translate-y-1/2 bg-black bg-opacity-60 hover:bg-opacity-80 text-white rounded-full w-8 h-8 flex items-center justify-center">‹</button>
-                <button onclick="nextScreenshot()" class="absolute right-1 top-1/2 -translate-y-1/2 bg-black bg-opacity-60 hover:bg-opacity-80 text-white rounded-full w-8 h-8 flex items-center justify-center">›</button>
-                <div class="absolute bottom-1 left-1/2 -translate-x-1/2 bg-black bg-opacity-60 text-white text-xs px-2 py-0.5 rounded">
-                    <span id="screenshotCounter">1 / ${modalScreenshots.length}</span>
-                </div>
+                <button onclick="prevScreenshot()" style="position:absolute;left:0.5rem;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:2rem;height:2rem;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center">‹</button>
+                <button onclick="nextScreenshot()" style="position:absolute;right:0.5rem;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:2rem;height:2rem;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center">›</button>
+                <span id="screenshotCounter" style="position:absolute;bottom:0.5rem;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;font-size:0.7rem;padding:0.15rem 0.5rem;border-radius:999px;font-family:'JetBrains Mono',monospace">1 / ${modalScreenshots.length}</span>
             ` : ''}
         </div>
         ${modalScreenshots.length > 1 ? `
-            <div class="flex gap-1 mb-3 overflow-x-auto pb-1">
+            <div style="display:flex;gap:0.3rem;margin-bottom:0.75rem;overflow-x:auto;padding-bottom:0.25rem">
                 ${modalScreenshots.map((url, i) => `
                     <img src="${escapeHtml(url)}" alt="" onclick="goToScreenshot(${i})"
-                         class="h-12 w-20 object-cover rounded cursor-pointer border-2 ${i === 0 ? 'border-blue-500' : 'border-transparent'} hover:border-blue-400 flex-shrink-0 screenshot-thumb"
+                         class="screenshot-thumb ${i === 0 ? 'border-blue-500' : 'border-transparent'}"
+                         style="height:3rem;width:5rem;object-fit:cover;border-radius:6px;cursor:pointer;flex-shrink:0"
                          onerror="this.style.display='none'"
                          data-index="${i}">
                 `).join('')}
@@ -289,8 +400,12 @@ function showGameModal(gameId) {
                 class="btn ${isFav ? 'btn-gold' : 'btn-ghost'}">
             ${isFav ? '⭐ Favorited' : '☆ Favorite'}
         </button>
-        <button id="rdLinksBtn" onclick="addToRealDebrid(${gameId})"
+        <button id="downloadBtn" onclick="queueDownload(${gameId})"
                 class="btn btn-primary" style="flex:1">
+            Download
+        </button>
+        <button id="rdLinksBtn" onclick="addToRealDebrid(${gameId})"
+                class="btn btn-ghost" style="flex:1">
             Get Links
         </button>
         <button onclick="hideConfirmModal()"
@@ -368,14 +483,14 @@ async function queueDownload(gameId) {
             showToast(data.message || 'Failed to queue download', 'error');
             if (downloadBtn) {
                 downloadBtn.disabled = false;
-                downloadBtn.innerHTML = '📥 Download';
+                downloadBtn.innerHTML = 'Download';
             }
         }
     } catch (error) {
         showToast('Error queuing download', 'error');
         if (downloadBtn) {
             downloadBtn.disabled = false;
-            downloadBtn.innerHTML = '📥 Download';
+            downloadBtn.innerHTML = 'Download';
         }
     }
 }
@@ -412,28 +527,45 @@ async function addToRealDebrid(gameId) {
 
 function showDownloadLinks(downloads, message) {
     document.getElementById('confirmContent').innerHTML = `
-        <h3 class="font-bold mb-3 text-green-400">✔ ${escapeHtml(message)}</h3>
-        <div class="space-y-2 max-h-96 overflow-y-auto">
+        <p style="font-weight:700;color:var(--green);margin-bottom:0.75rem;font-size:0.95rem">${escapeHtml(message)}</p>
+        <div style="display:flex;flex-direction:column;gap:0.5rem;max-height:24rem;overflow-y:auto">
             ${downloads.map(dl => `
                 <a href="${escapeHtml(dl.download_url)}"
                    download
                    target="_blank"
-                   class="block bg-gray-700 hover:bg-gray-600 p-3 rounded border border-gray-600 hover:border-green-500 transition">
-                    <div class="font-semibold text-sm mb-1">📥 ${escapeHtml(dl.filename)}</div>
-                    <div class="text-xs text-gray-400">Click to download</div>
+                   style="display:block;background:var(--bg-surface);padding:0.75rem;border-radius:10px;border:1px solid var(--border);text-decoration:none;color:var(--text);transition:border-color 0.15s"
+                   onmouseover="this.style.borderColor='var(--green)'" onmouseout="this.style.borderColor='var(--border)'">
+                    <div style="font-weight:600;font-size:0.85rem;margin-bottom:0.15rem">${escapeHtml(dl.filename)}</div>
+                    <div style="font-size:0.7rem;color:var(--text-dim)">Click to download</div>
                 </a>
             `).join('')}
         </div>
-        <p class="text-xs text-gray-400 mt-4">Direct download links from Real-Debrid. Links are valid for a limited time.</p>
+        <p style="font-size:0.7rem;color:var(--text-dim);margin-top:0.75rem">Direct download links from Real-Debrid. Links expire after a limited time.</p>
     `;
 
     document.getElementById('confirmBtnContainer').innerHTML = `
-        <button onclick="hideConfirmModal()" class="flex-1 bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">
+        <button onclick="copyAllLinks()" class="btn btn-ghost" style="flex:0">
+            Copy All Links
+        </button>
+        <button onclick="hideConfirmModal()" class="btn btn-secondary">
             Close
         </button>
     `;
 
+    // Stash links for copy-all
+    window._lastDownloadLinks = downloads.map(dl => dl.download_url);
+
     showToast('Download links ready!', 'success');
+}
+
+function copyAllLinks() {
+    const links = window._lastDownloadLinks || [];
+    if (links.length === 0) return;
+    navigator.clipboard.writeText(links.join('\n')).then(() => {
+        showToast(`Copied ${links.length} link${links.length > 1 ? 's' : ''} to clipboard`, 'success');
+    }).catch(() => {
+        prompt('Copy these links:', links.join('\n'));
+    });
 }
 
 // ─── Downloads View ───
@@ -479,17 +611,17 @@ function renderDownloads(downloads) {
 
     if (downloads.length === 0) {
         container.innerHTML = `
-            <div class="text-center py-16">
-                <p class="text-2xl text-gray-500 mb-4">No downloads yet</p>
-                <p class="text-gray-400">Click a game and hit "Download" to get started.</p>
+            <div class="empty-state">
+                <p>No downloads yet</p>
+                <p>Click a game and hit "Get Links" to get started.</p>
             </div>
         `;
         return;
     }
 
     container.innerHTML = downloads.map(dl => {
-        const statusIcon = getStatusIcon(dl.status);
-        const statusColor = getStatusColor(dl.status);
+        const statusLabel = getStatusLabel(dl.status);
+        const statusStyle = getStatusStyle(dl.status);
         const progressPct = Math.min(100, Math.max(0, dl.progress || 0));
 
         let statsHtml = '';
@@ -499,8 +631,8 @@ function renderDownloads(downloads) {
 
         switch (dl.status) {
             case 'queued':
-                statsHtml = '<span class="text-yellow-400">Waiting in queue...</span>';
-                actionsHtml = `<button onclick="cancelDownload(${dl.id})" class="text-sm bg-red-600 hover:bg-red-700 px-3 py-1 rounded">Cancel</button>`;
+                statsHtml = '<span style="color:var(--gold)">Waiting in queue...</span>';
+                actionsHtml = `<button onclick="cancelDownload(${dl.id})" class="btn btn-ghost" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem;color:var(--red)">Cancel</button>`;
                 break;
 
             case 'downloading':
@@ -509,12 +641,12 @@ function renderDownloads(downloads) {
                 const progressStr = `${progressPct.toFixed(1)}%`;
                 statsHtml = `
                     <span>${progressStr}</span>
-                    <span class="mx-2">•</span>
+                    <span style="margin:0 0.35rem;color:var(--text-dim)">·</span>
                     <span>${speedStr}</span>
-                    <span class="mx-2">•</span>
+                    <span style="margin:0 0.35rem;color:var(--text-dim)">·</span>
                     <span>${etaStr} remaining</span>
                 `;
-                actionsHtml = `<button onclick="cancelDownload(${dl.id})" class="text-sm bg-red-600 hover:bg-red-700 px-3 py-1 rounded">Cancel</button>`;
+                actionsHtml = `<button onclick="cancelDownload(${dl.id})" class="btn btn-ghost" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem;color:var(--red)">Cancel</button>`;
                 break;
 
             case 'extracting':
@@ -524,93 +656,111 @@ function renderDownloads(downloads) {
                     const filesInfo = ep.files_total > 0
                         ? `${ep.files_done}/${ep.files_total} files`
                         : `${ep.files_done} files`;
-                    statsHtml = `
-                        <span class="text-blue-400">${escapeHtml(ep.message)}</span>
-                    `;
-                    // Override progressPct for the bar
+                    statsHtml = `<span style="color:var(--purple)">${escapeHtml(ep.message)}</span>`;
                     extractPct = epPct;
                     extractInfo = filesInfo;
                 } else {
-                    statsHtml = '<span class="text-blue-400">Extracting archives...</span>';
-                    extractPct = null;
-                    extractInfo = null;
+                    statsHtml = '<span style="color:var(--purple)">Extracting archives...</span>';
                 }
                 break;
 
             case 'completed':
-                statsHtml = `<span class="text-green-400">Ready to install${dl.completed_at ? ' • ' + formatDate(dl.completed_at) : ''}</span>`;
+                statsHtml = `<span style="color:var(--green)">Ready to install${dl.completed_at ? ' · ' + formatDate(dl.completed_at) : ''}</span>`;
+                const hasMultipleFiles = dl.files && dl.files.length > 1;
+                const md5ButtonDisabled = !dl.has_md5;
                 actionsHtml = `
-                    ${dl.installer_path ? `<button onclick="launchInstall(${dl.id})" class="text-sm bg-green-600 hover:bg-green-700 px-3 py-1 rounded font-semibold">🎮 Install</button>` : ''}
-                    ${dl.file_path ? `<button onclick="copyPath('${escapeHtml(dl.file_path)}')" class="text-sm bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded">📁 Open Folder</button>` : ''}
-                    <button onclick="removeDownload(${dl.id})" class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded">Remove</button>
+                    ${dl.installer_path ? `<button onclick="launchInstall(${dl.id})" class="btn btn-primary" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem">Install</button>` : ''}
+                    <button
+                        onclick="${md5ButtonDisabled ? 'showToast(\'No MD5 file found in download\', \'error\')' : `validateMD5(${dl.id})`}"
+                        class="btn btn-ghost"
+                        style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem;${md5ButtonDisabled ? 'opacity:0.4;cursor:not-allowed' : ''}"
+                        ${md5ButtonDisabled ? 'disabled' : ''}>
+                        ✓ Validate MD5
+                    </button>
+                    ${hasMultipleFiles ? `<button onclick="downloadAllFiles(${dl.id})" class="btn btn-ghost" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem">⬇ Download All</button>` : ''}
+                    ${dl.file_path ? `<button onclick="copyPath('${escapeHtml(dl.file_path)}')" class="btn btn-ghost" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem">Copy Path</button>` : ''}
+                    <button onclick="deleteDownload(${dl.id}, '${escapeHtml(dl.game_title).replace(/'/g, "\\'")}')" class="btn btn-ghost" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem;color:var(--red)">🗑 Delete Files</button>
                 `;
                 break;
 
             case 'installing':
-                statsHtml = '<span class="text-purple-400">Installer launched — complete the setup wizard</span>';
+                statsHtml = '<span style="color:var(--purple)">Installer launched — complete the setup wizard</span>';
                 actionsHtml = `
-                    <button onclick="markInstalled(${dl.id})" class="text-sm bg-green-600 hover:bg-green-700 px-3 py-1 rounded">✅ Done Installing</button>
-                    <button onclick="launchInstall(${dl.id})" class="text-sm bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded">🔄 Relaunch</button>
+                    <button onclick="markInstalled(${dl.id})" class="btn btn-primary" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem">Done Installing</button>
+                    <button onclick="launchInstall(${dl.id})" class="btn btn-ghost" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem">Relaunch</button>
                 `;
                 break;
 
             case 'installed':
-                statsHtml = `<span class="text-green-400">✅ Installed${dl.completed_at ? ' • ' + formatDate(dl.completed_at) : ''}</span>`;
+                statsHtml = `<span style="color:var(--green)">Installed${dl.completed_at ? ' · ' + formatDate(dl.completed_at) : ''}</span>`;
+                const hasMultipleFilesInstalled = dl.files && dl.files.length > 1;
+                const md5ButtonDisabledInstalled = !dl.has_md5;
                 actionsHtml = `
-                    ${dl.file_path ? `<button onclick="copyPath('${escapeHtml(dl.file_path)}')" class="text-sm bg-gray-600 hover:bg-gray-500 px-3 py-1 rounded">📁 Open Folder</button>` : ''}
-                    <button onclick="removeDownload(${dl.id})" class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded">Remove</button>
+                    <button
+                        onclick="${md5ButtonDisabledInstalled ? 'showToast(\'No MD5 file found in download\', \'error\')' : `validateMD5(${dl.id})`}"
+                        class="btn btn-ghost"
+                        style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem;${md5ButtonDisabledInstalled ? 'opacity:0.4;cursor:not-allowed' : ''}"
+                        ${md5ButtonDisabledInstalled ? 'disabled' : ''}>
+                        ✓ Validate MD5
+                    </button>
+                    ${hasMultipleFilesInstalled ? `<button onclick="downloadAllFiles(${dl.id})" class="btn btn-ghost" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem">⬇ Download All</button>` : ''}
+                    ${dl.file_path ? `<button onclick="copyPath('${escapeHtml(dl.file_path)}')" class="btn btn-ghost" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem">Copy Path</button>` : ''}
+                    <button onclick="deleteDownload(${dl.id}, '${escapeHtml(dl.game_title).replace(/'/g, "\\'")}')" class="btn btn-ghost" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem;color:var(--red)">🗑 Delete Files</button>
                 `;
                 break;
 
             case 'failed':
-                statsHtml = `<span class="text-red-400">${escapeHtml(dl.error_message || 'Unknown error')}</span>`;
+                statsHtml = `<span style="color:var(--red)">${escapeHtml(dl.error_message || 'Unknown error')}</span>`;
                 actionsHtml = `
-                    <button onclick="retryDownload(${dl.id})" class="text-sm bg-yellow-600 hover:bg-yellow-700 px-3 py-1 rounded">Retry</button>
-                    <button onclick="removeDownload(${dl.id})" class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded">Remove</button>
+                    <button onclick="retryDownload(${dl.id})" class="btn btn-gold" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem">Retry</button>
+                    <button onclick="removeDownload(${dl.id})" class="btn btn-ghost" style="flex:0;padding:0.35rem 0.75rem;font-size:0.75rem">Remove</button>
                 `;
                 break;
         }
 
         const showProgress = dl.status === 'downloading' || dl.status === 'extracting';
         const barPct = dl.status === 'extracting' && extractPct !== null ? extractPct : progressPct;
-        const barColor = dl.status === 'extracting' ? 'bg-blue-500' : 'bg-green-500';
-        const barAnimate = dl.status === 'extracting' && extractPct === null ? ' animate-pulse' : '';
+        const barClass = dl.status === 'extracting' ? 'enriching' : '';
 
         return `
-            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                <div class="flex justify-between items-start mb-2">
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-bottom:0.625rem">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem">
                     <div>
-                        <h3 class="font-bold text-lg">${statusIcon} ${escapeHtml(dl.game_title)}</h3>
-                        <p class="text-sm text-gray-400">${escapeHtml(dl.game_size)}</p>
+                        <h3 style="font-weight:700;font-size:0.95rem;margin-bottom:0.15rem">${escapeHtml(dl.game_title)}</h3>
+                        <p style="font-size:0.775rem;color:var(--text-dim);font-family:'JetBrains Mono',monospace">${escapeHtml(dl.game_size)}</p>
                     </div>
-                    <span class="text-xs px-2 py-1 rounded ${statusColor}">${dl.status.toUpperCase()}</span>
+                    <span style="${statusStyle};font-size:0.675rem;font-weight:600;padding:0.2rem 0.6rem;border-radius:999px">${statusLabel}</span>
                 </div>
                 ${showProgress ? `
-                    <div class="progress-bar-container bg-gray-700 rounded-full h-3 mb-1 overflow-hidden">
-                        <div class="h-full rounded-full transition-all duration-300 ${barColor}${barAnimate}"
-                             style="width: ${barPct}%"></div>
+                    <div class="progress-track" style="margin-bottom:0.35rem">
+                        <div class="progress-fill ${barClass}" style="width:${barPct}%"></div>
                     </div>
                     ${dl.status === 'extracting' && extractPct !== null ? `
-                        <div class="flex justify-between text-xs text-gray-500 mb-2">
+                        <div style="display:flex;justify-content:space-between;font-size:0.675rem;color:var(--text-dim);margin-bottom:0.5rem;font-family:'JetBrains Mono',monospace">
                             <span>${extractInfo || ''}</span>
                             <span>${extractPct.toFixed(1)}%</span>
                         </div>
                     ` : ''}
                 ` : ''}
-                <div class="flex justify-between items-center text-sm text-gray-400">
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;color:var(--text-muted)">
                     <div>${statsHtml}</div>
-                    <div class="flex gap-2">${actionsHtml}</div>
+                    <div style="display:flex;gap:0.375rem">${actionsHtml}</div>
                 </div>
                 ${dl.files && dl.files.length > 0 ? `
-                    <details class="mt-2">
-                        <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-300">
-                            ${dl.files.length} file(s)
-                        </summary>
-                        <div class="mt-1 text-xs text-gray-500 space-y-1">
+                    <details style="margin-top:0.5rem">
+                        <summary style="font-size:0.7rem;color:var(--text-dim);cursor:pointer">${dl.files.length} file(s)</summary>
+                        <div style="margin-top:0.35rem;display:flex;flex-direction:column;gap:0.2rem">
                             ${dl.files.map(f => `
-                                <div class="flex justify-between">
-                                    <span>${escapeHtml(f.filename)}</span>
-                                    <span>${f.file_size ? formatBytes(f.file_size) : '—'}${f.is_extracted ? ' ✔' : ''}</span>
+                                <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.7rem;color:var(--text-dim);font-family:'JetBrains Mono',monospace">
+                                    <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${escapeHtml(f.filename)}</span>
+                                    <div style="display:flex;align-items:center;gap:0.5rem">
+                                        <span>${f.file_size ? formatBytes(f.file_size) : '—'}${f.is_extracted ? ' ✓' : ''}</span>
+                                        ${f.file_path && (dl.status === 'completed' || dl.status === 'installed') ? `
+                                            <button onclick="downloadFile(${f.id}, '${escapeHtml(f.filename)}')" class="btn btn-ghost" style="padding:0.15rem 0.4rem;font-size:0.65rem;min-width:auto" title="Download to your computer">
+                                                <span style="font-size:0.9rem">⬇</span>
+                                            </button>
+                                        ` : ''}
+                                    </div>
                                 </div>
                             `).join('')}
                         </div>
@@ -660,13 +810,119 @@ async function removeDownload(id) {
         const response = await fetch(`${API_BASE}/downloads/${id}/remove`, { method: 'DELETE' });
         const data = await response.json();
         if (data.success) {
-            showToast('Download removed', 'info');
+            showToast('Download removed from list', 'info');
             loadDownloads();
         } else {
             showToast(data.message, 'error');
         }
     } catch (error) {
         showToast('Error removing download', 'error');
+    }
+}
+
+async function deleteDownload(id, gameName) {
+    if (!confirm(`⚠️ Permanently delete "${gameName}" and all its files from disk?\n\nThis cannot be undone!`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/downloads/${id}/delete`, { method: 'DELETE' });
+        const data = await response.json();
+        if (data.success) {
+            showToast('Download and files deleted permanently', 'success');
+            loadDownloads();
+        } else {
+            showToast(data.message, 'error');
+        }
+    } catch (error) {
+        showToast('Error deleting download', 'error');
+        console.error('Delete error:', error);
+    }
+}
+
+async function scanExistingGames() {
+    try {
+        showToast('Scanning for existing games...', 'info');
+        const response = await fetch(`${API_BASE}/downloads/scan`, { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            showToast(data.message, 'success');
+            loadDownloads();
+        } else {
+            showToast(data.message, 'error');
+        }
+    } catch (error) {
+        showToast('Error scanning games', 'error');
+        console.error('Scan error:', error);
+    }
+}
+
+async function downloadFile(fileId, filename) {
+    try {
+        showToast(`Downloading ${filename}...`, 'info');
+
+        // Create a link and trigger download
+        const downloadUrl = `${API_BASE}/downloads/files/${fileId}`;
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        // Note: We can't easily show completion since browser handles the download
+        setTimeout(() => {
+            showToast('Download started in your browser', 'success');
+        }, 500);
+    } catch (error) {
+        showToast('Error downloading file', 'error');
+        console.error('Download error:', error);
+    }
+}
+
+async function downloadAllFiles(downloadId) {
+    try {
+        // Get the download info to access files
+        const response = await fetch(`${API_BASE}/downloads/${downloadId}`);
+        if (!response.ok) {
+            throw new Error('Failed to get download info');
+        }
+
+        const downloadInfo = await response.json();
+        const files = downloadInfo.files || [];
+
+        if (files.length === 0) {
+            showToast('No files available to download', 'warning');
+            return;
+        }
+
+        showToast(`Downloading ${files.length} file(s)...`, 'info');
+
+        // Download each file with a small delay to avoid overwhelming the browser
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            if (file.file_path) {
+                const downloadUrl = `${API_BASE}/downloads/files/${file.id}`;
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = file.filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+
+                // Small delay between downloads to avoid browser blocking
+                if (i < files.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
+            }
+        }
+
+        setTimeout(() => {
+            showToast(`Started downloading ${files.length} file(s)`, 'success');
+        }, 500);
+    } catch (error) {
+        showToast('Error downloading files', 'error');
+        console.error('Download all error:', error);
     }
 }
 
@@ -697,6 +953,85 @@ async function markInstalled(id) {
         }
     } catch (error) {
         showToast('Error updating status', 'error');
+    }
+}
+
+async function validateMD5(id) {
+    try {
+        showToast('Validating MD5 checksums...', 'info');
+        const response = await fetch(`${API_BASE}/downloads/${id}/validate`, { method: 'POST' });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            showToast(`Validation failed: ${errorText}`, 'error');
+            return;
+        }
+
+        const result = await response.json();
+
+        // Show results in a modal
+        let resultsHtml = `
+            <div style="margin-bottom:1rem">
+                <h3 style="margin-bottom:0.5rem;color:${result.failed > 0 ? 'var(--red)' : 'var(--green)'}">
+                    ${result.status}
+                </h3>
+                <div style="font-size:0.875rem;color:var(--text-secondary)">
+                    Total: ${result.total_files} | Valid: ${result.validated} | Failed: ${result.failed} | Skipped: ${result.skipped}
+                </div>
+            </div>
+        `;
+
+        if (result.files && result.files.length > 0) {
+            resultsHtml += '<div style="max-height:400px;overflow-y:auto">';
+            for (const file of result.files) {
+                const statusColor = file.status === 'valid' ? 'var(--green)' :
+                                  file.status === 'invalid' ? 'var(--red)' :
+                                  file.status === 'missing' ? 'var(--orange)' :
+                                  'var(--text-secondary)';
+                const statusIcon = file.status === 'valid' ? '✓' :
+                                 file.status === 'invalid' ? '✗' :
+                                 file.status === 'missing' ? '?' : '–';
+
+                resultsHtml += `
+                    <div style="padding:0.5rem;margin-bottom:0.5rem;background:var(--surface);border-radius:4px;border-left:3px solid ${statusColor}">
+                        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem">
+                            <span style="color:${statusColor};font-weight:bold">${statusIcon}</span>
+                            <span style="font-size:0.875rem;word-break:break-all">${escapeHtml(file.filename)}</span>
+                        </div>
+                        ${file.status === 'invalid' && file.expected_hash ? `
+                            <div style="font-size:0.75rem;color:var(--text-secondary);margin-left:1.5rem">
+                                Expected: ${file.expected_hash}<br>
+                                Got: ${file.actual_hash || 'N/A'}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+            resultsHtml += '</div>';
+        }
+
+        // Show modal with results
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:600px">
+                <h2>MD5 Validation Results</h2>
+                ${resultsHtml}
+                <div style="display:flex;gap:0.5rem;margin-top:1rem">
+                    <button onclick="this.closest('.modal').remove()" class="btn btn-primary" style="flex:1">Close</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        if (result.failed === 0) {
+            showToast(`All ${result.validated} files validated successfully!`, 'success');
+        } else {
+            showToast(`${result.failed} file(s) failed validation`, 'error');
+        }
+    } catch (error) {
+        console.error('Validation error:', error);
+        showToast('Error validating MD5 checksums', 'error');
     }
 }
 
@@ -868,29 +1203,29 @@ async function checkScrapeStatus() {
 
 // ─── Helpers ───
 
-function getStatusIcon(status) {
+function getStatusLabel(status) {
     switch (status) {
-        case 'queued': return '⏳';
-        case 'downloading': return '📥';
-        case 'extracting': return '📦';
-        case 'completed': return '✅';
-        case 'installing': return '🔧';
-        case 'installed': return '🎮';
-        case 'failed': return '❌';
-        default: return '❓';
+        case 'queued': return 'QUEUED';
+        case 'downloading': return 'DOWNLOADING';
+        case 'extracting': return 'EXTRACTING';
+        case 'completed': return 'COMPLETE';
+        case 'installing': return 'INSTALLING';
+        case 'installed': return 'INSTALLED';
+        case 'failed': return 'FAILED';
+        default: return status.toUpperCase();
     }
 }
 
-function getStatusColor(status) {
+function getStatusStyle(status) {
     switch (status) {
-        case 'queued': return 'bg-yellow-800 text-yellow-200';
-        case 'downloading': return 'bg-blue-800 text-blue-200';
-        case 'extracting': return 'bg-purple-800 text-purple-200';
-        case 'completed': return 'bg-green-800 text-green-200';
-        case 'installing': return 'bg-purple-800 text-purple-200';
-        case 'installed': return 'bg-green-900 text-green-300';
-        case 'failed': return 'bg-red-800 text-red-200';
-        default: return 'bg-gray-700 text-gray-300';
+        case 'queued': return 'background:var(--yellow-bg);color:var(--gold)';
+        case 'downloading': return 'background:var(--accent-glow);color:var(--accent-bright)';
+        case 'extracting': return 'background:var(--purple-dim);color:#a78bfa';
+        case 'completed': return 'background:var(--green-dim);color:var(--green)';
+        case 'installing': return 'background:var(--purple-dim);color:#a78bfa';
+        case 'installed': return 'background:var(--green-dim);color:var(--green)';
+        case 'failed': return 'background:var(--red-dim);color:var(--red)';
+        default: return 'background:var(--bg-surface);color:var(--text-dim)';
     }
 }
 
@@ -969,6 +1304,7 @@ function filterByGenre(genre) {
         select.value = genre;
     }
     currentPage = 1;
+    currentGames = [];
     loadGames();
 }
 
@@ -1033,7 +1369,7 @@ async function loadFavoritesView() {
         const games = data.favorites || [];
         currentGames = games;
         renderGames(games);
-        document.getElementById('statsText').textContent = `⭐ ${games.length} favorite${games.length !== 1 ? 's' : ''}`;
+        document.getElementById('statsText').textContent = `${games.length} favorite${games.length !== 1 ? 's' : ''}`;
         document.getElementById('pagination').innerHTML = '';
 
         if (games.length === 0) {
@@ -1078,15 +1414,15 @@ async function showSettingsModal() {
         const s = data.settings;
 
         if (s.rawg_api_key_set === 'true') {
-            document.getElementById('rawgKeyStatus').innerHTML = `<span class="text-green-400">✓ Set</span> <span class="text-gray-500">(${s.rawg_api_key_masked})</span> — leave blank to keep current`;
+            document.getElementById('rawgKeyStatus').innerHTML = `<span style="color:var(--green)">✓ Set</span> <span style="color:var(--text-dim)">(${s.rawg_api_key_masked})</span> — leave blank to keep current`;
         } else {
-            document.getElementById('rawgKeyStatus').innerHTML = '<span class="text-yellow-400">⚠ Not set</span> — images won\'t load without this';
+            document.getElementById('rawgKeyStatus').innerHTML = '<span style="color:var(--gold)">Not set</span> — images won\'t load without this';
         }
 
         if (s.rd_api_key_set === 'true') {
-            document.getElementById('rdKeyStatus').innerHTML = `<span class="text-green-400">✓ Set</span> <span class="text-gray-500">(${s.rd_api_key_masked})</span> — leave blank to keep current`;
+            document.getElementById('rdKeyStatus').innerHTML = `<span style="color:var(--green)">✓ Set</span> <span style="color:var(--text-dim)">(${s.rd_api_key_masked})</span> — leave blank to keep current`;
         } else {
-            document.getElementById('rdKeyStatus').innerHTML = '<span class="text-yellow-400">⚠ Not set</span> — downloads won\'t work without this';
+            document.getElementById('rdKeyStatus').innerHTML = '<span style="color:var(--gold)">Not set</span> — downloads won\'t work without this';
         }
     } catch (error) {
         document.getElementById('rawgKeyStatus').textContent = 'Failed to load settings';

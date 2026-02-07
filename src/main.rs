@@ -2,14 +2,18 @@ mod db;
 mod downloader;
 mod download_manager;
 mod extractor;
+mod md5_validator;
 mod rawg;
 mod realdebrid;
-mod scraper;
+mod scraper;  // Keep old scraper for backward compatibility during transition
+mod scrapers;
+mod system_info;
 
 use axum::{
+    body::Body,
     extract::{Multipart, Path, Query, State},
-    http::StatusCode,
-    response::Json,
+    http::{header, StatusCode},
+    response::{IntoResponse, Json, Response},
     routing::{delete, get, post},
     Router,
 };
@@ -17,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio_util::io::ReaderStream;
 use tower_http::{
     cors::CorsLayer,
     services::ServeDir,
@@ -29,13 +34,14 @@ struct AppState {
     scrape_status: Arc<RwLock<ScrapeStatus>>,
     download_manager: Arc<download_manager::DownloadManager>,
     rawg_api_key: String,
+    scraper_registry: Arc<scrapers::registry::ScraperRegistry>,
 }
 
 #[derive(Clone, Serialize)]
 struct ScrapeStatus {
     is_running: bool,
     #[serde(flatten)]
-    progress: scraper::ScrapeProgress,
+    progress: scrapers::ScrapeProgress,
     last_result: Option<String>,
     last_completed: Option<String>,
 }
@@ -44,7 +50,7 @@ impl Default for ScrapeStatus {
     fn default() -> Self {
         Self {
             is_running: false,
-            progress: scraper::ScrapeProgress::default(),
+            progress: scrapers::ScrapeProgress::default(),
             last_result: None,
             last_completed: None,
         }
@@ -159,12 +165,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Resume any queued downloads from previous session
     dm.try_process_queue().await;
 
+    // Initialize scraper registry
+    let mut scraper_registry = scrapers::registry::ScraperRegistry::new();
+    scraper_registry.register(Arc::new(scrapers::fitgirl::FitGirlScraper::new()));
+    scraper_registry.register(Arc::new(scrapers::steamrip::SteamRipScraper::new()));
+    let scraper_registry = Arc::new(scraper_registry);
+
     let state = AppState {
         db: db.clone(),
         rd_client,
         scrape_status: Arc::new(RwLock::new(ScrapeStatus::default())),
         download_manager: dm,
         rawg_api_key,
+        scraper_registry,
     };
 
     let frontend_dir = std::env::current_exe()
@@ -185,6 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/games/upload", post(upload_csv))
         .route("/api/games/rescrape", post(rescrape))
         .route("/api/scrape-status", get(get_scrape_status))
+        .route("/api/sources", get(get_sources))
         .route("/api/realdebrid/add", post(add_to_realdebrid))
         // Download management routes
         .route("/api/downloads", get(get_downloads))
@@ -195,9 +209,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/downloads/:id/remove", delete(remove_download))
         .route("/api/downloads/:id/install", post(launch_install))
         .route("/api/downloads/:id/installed", post(mark_installed))
+        .route("/api/downloads/:id/validate", post(validate_download))
+        .route("/api/downloads/:id/delete", delete(delete_download))
+        .route("/api/downloads/scan", post(scan_existing_games))
+        .route("/api/downloads/files/:file_id", get(download_file))
         // Settings routes
         .route("/api/settings", get(get_settings))
         .route("/api/settings", post(save_settings))
+        // System information
+        .route("/api/system-info", get(get_system_info))
+        // Health check
+        .route("/api/health", get(health_check))
         // Static files
         .nest_service("/", ServeDir::new(frontend_dir))
         .layer(CorsLayer::permissive())
@@ -442,7 +464,9 @@ async fn upload_csv(
         }
 
         games.push(db::GameInsert {
+            search_title: Some(db::clean_search_title(&title)),
             title,
+            source: "fitgirl".to_string(),  // CSV uploads default to fitgirl
             file_size,
             magnet_link,
             genres: None,
@@ -484,8 +508,15 @@ async fn upload_csv(
     }))
 }
 
+#[derive(Deserialize)]
+struct RescrapeParams {
+    #[serde(default)]
+    source: Option<String>,  // "fitgirl", "steamrip", or "all"
+}
+
 async fn rescrape(
     State(state): State<AppState>,
+    Query(params): Query<RescrapeParams>,
 ) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
     {
         let status = state.scrape_status.read().await;
@@ -503,11 +534,21 @@ async fn rescrape(
         let mut status = state.scrape_status.write().await;
         status.is_running = true;
         status.last_result = None;
-        status.progress = scraper::ScrapeProgress::default();
+        status.progress = scrapers::ScrapeProgress::default();
     }
 
     let scrape_status = state.scrape_status.clone();
     let db = state.db.clone();
+    let scraper_registry = state.scraper_registry.clone();
+
+    // Determine which sources to scrape
+    let source_filter = params.source.unwrap_or_else(|| "all".to_string());
+    let sources_to_scrape: Vec<String> = if source_filter == "all" {
+        vec!["fitgirl".to_string(), "steamrip".to_string()]
+    } else {
+        vec![source_filter]
+    };
+
     // Read RAWG key from DB first, fall back to env var
     let rawg_key = db::get_setting(&state.db, "rawg_api_key")
         .await
@@ -517,10 +558,10 @@ async fn rescrape(
 
     tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(async move {
-            println!("Starting scrape...");
+            println!("Starting scrape for sources: {:?}", sources_to_scrape);
 
             // Create shared progress for the scraper
-            let scrape_progress = Arc::new(RwLock::new(scraper::ScrapeProgress::default()));
+            let scrape_progress = Arc::new(RwLock::new(scrapers::ScrapeProgress::default()));
 
             // Spawn a task to sync scraper progress back to ScrapeStatus every second
             let sync_progress = scrape_progress.clone();
@@ -537,11 +578,30 @@ async fn rescrape(
                 }
             });
 
-            let result = match scraper::scrape_all_games_with_progress(scrape_progress.clone()).await {
-                Ok(mut games) => {
-                    let total = games.len();
-                    let with_img = games.iter().filter(|g| g.thumbnail_url.is_some()).count();
-                    let with_genres = games.iter().filter(|g| g.genres.is_some()).count();
+            // Scrape from all requested sources
+            let mut all_scraped_games = Vec::new();
+            for source_name in sources_to_scrape {
+                if let Some(scraper) = scraper_registry.get(&source_name) {
+                    println!("Scraping from source: {}", scraper.source_label());
+                    match scraper.scrape_all_games(scrape_progress.clone()).await {
+                        Ok(games) => {
+                            println!("Got {} games from {}", games.len(), scraper.source_label());
+                            all_scraped_games.extend(games);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to scrape from {}: {}", scraper.source_label(), e);
+                        }
+                    }
+                } else {
+                    eprintln!("Unknown source: {}", source_name);
+                }
+            }
+
+            let result = if !all_scraped_games.is_empty() {
+                {
+                    let total = all_scraped_games.len();
+                    let with_img = all_scraped_games.iter().filter(|g| g.thumbnail_url.is_some()).count();
+                    let with_genres = all_scraped_games.iter().filter(|g| g.genres.is_some()).count();
                     println!(
                         "WP scrape got {}/{} images, {}/{} genres — checking RAWG for gaps...",
                         with_img, total, with_genres, total
@@ -549,7 +609,39 @@ async fn rescrape(
 
                     // RAWG enrichment — only for games MISSING images or genres
                     if !rawg_key.is_empty() {
-                        let missing_indices: Vec<usize> = games.iter().enumerate()
+                        // Load existing metadata cache from DB to avoid re-querying RAWG
+                        let metadata_cache = db::get_metadata_cache(&db).await.unwrap_or_default();
+                        let cache_size = metadata_cache.len();
+                        if cache_size > 0 {
+                            println!("Loaded RAWG cache with {} entries from existing DB", cache_size);
+                        }
+
+                        // Apply cache first
+                        let mut cache_hits = 0;
+                        for game in all_scraped_games.iter_mut() {
+                            if game.thumbnail_url.is_some() && game.genres.is_some() {
+                                continue;
+                            }
+                            let norm = game.title.to_lowercase()
+                                .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
+                                .split_whitespace()
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            if let Some((cached_thumb, cached_genres)) = metadata_cache.get(&norm) {
+                                if game.thumbnail_url.is_none() && cached_thumb.is_some() {
+                                    game.thumbnail_url = cached_thumb.clone();
+                                    cache_hits += 1;
+                                }
+                                if game.genres.is_none() && cached_genres.is_some() {
+                                    game.genres = cached_genres.clone();
+                                }
+                            }
+                        }
+                        if cache_hits > 0 {
+                            println!("RAWG cache filled {} games without API calls", cache_hits);
+                        }
+
+                        let missing_indices: Vec<usize> = all_scraped_games.iter().enumerate()
                             .filter(|(_, g)| g.thumbnail_url.is_none() || g.genres.is_none())
                             .map(|(i, _)| i)
                             .collect();
@@ -559,7 +651,7 @@ async fn rescrape(
                         } else {
                             println!("RAWG enriching {} games missing images/genres...", missing_indices.len());
                             let titles: Vec<String> = missing_indices.iter()
-                                .map(|&i| games[i].title.clone())
+                                .map(|&i| all_scraped_games[i].title.clone())
                                 .collect();
                             let metadata = rawg::enrich_games(&titles, &rawg_key, scrape_progress.clone()).await;
 
@@ -568,12 +660,12 @@ async fn rescrape(
                             for (j, meta) in metadata.into_iter().enumerate() {
                                 let i = missing_indices[j];
                                 if let Some(meta) = meta {
-                                    if games[i].thumbnail_url.is_none() && meta.image_url.is_some() {
-                                        games[i].thumbnail_url = meta.image_url;
+                                    if all_scraped_games[i].thumbnail_url.is_none() && meta.image_url.is_some() {
+                                        all_scraped_games[i].thumbnail_url = meta.image_url;
                                         images_applied += 1;
                                     }
-                                    if games[i].genres.is_none() && meta.genres.is_some() {
-                                        games[i].genres = meta.genres;
+                                    if all_scraped_games[i].genres.is_none() && meta.genres.is_some() {
+                                        all_scraped_games[i].genres = meta.genres;
                                         genres_applied += 1;
                                     }
                                 }
@@ -597,7 +689,7 @@ async fn rescrape(
                     {
                         let mut p = scrape_progress.write().await;
                         p.phase = "saving".to_string();
-                        p.message = format!("Saving {} games to database...", games.len());
+                        p.message = format!("Saving {} games to database...", all_scraped_games.len());
                         p.progress = 98.0;
                     }
                     // Sync once more
@@ -607,21 +699,68 @@ async fn rescrape(
                         s.progress = p;
                     }
 
-                    println!("Scraped {} games, inserting into database...", games.len());
+                    println!("Scraped {} games, deduplicating...", all_scraped_games.len());
 
-                    let game_inserts: Vec<db::GameInsert> = games
+                    // Deduplicate by normalized title — keep the entry with the most metadata
+                    let before_dedup = all_scraped_games.len();
+                    {
+                        let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                        let mut keep = vec![false; all_scraped_games.len()];
+                        for (i, g) in all_scraped_games.iter().enumerate() {
+                            let norm = g.title.to_lowercase()
+                                .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
+                                .split_whitespace()
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            if let Some(&prev) = seen.get(&norm) {
+                                // Keep whichever has more metadata (thumbnail, genres, screenshots)
+                                let score = |idx: usize| -> usize {
+                                    let g = &all_scraped_games[idx];
+                                    (if g.thumbnail_url.is_some() { 1 } else { 0 })
+                                    + (if g.genres.is_some() { 1 } else { 0 })
+                                    + (if g.screenshots.is_some() { 1 } else { 0 })
+                                    + (if g.company.is_some() { 1 } else { 0 })
+                                };
+                                if score(i) > score(prev) {
+                                    keep[prev] = false;
+                                    keep[i] = true;
+                                    seen.insert(norm, i);
+                                }
+                                // else keep the previous one
+                            } else {
+                                seen.insert(norm, i);
+                                keep[i] = true;
+                            }
+                        }
+                        let mut idx = 0;
+                        all_scraped_games.retain(|_| { let k = keep[idx]; idx += 1; k });
+                    }
+                    if before_dedup != all_scraped_games.len() {
+                        println!("Deduped: {} → {} games ({} duplicates removed)",
+                            before_dedup, all_scraped_games.len(), before_dedup - all_scraped_games.len());
+                    }
+
+                    println!("Inserting {} games into database...", all_scraped_games.len());
+
+                    // Convert scraped games to database inserts
+                    let game_inserts: Vec<db::GameInsert> = all_scraped_games
                         .into_iter()
-                        .map(|g| db::GameInsert {
-                            title: g.title,
-                            file_size: g.file_size,
-                            magnet_link: g.magnet_link,
-                            genres: g.genres,
-                            company: g.company,
-                            original_size: g.original_size,
-                            thumbnail_url: g.thumbnail_url,
-                            screenshots: g.screenshots,
-                            source_url: g.source_url,
-                            post_date: g.post_date,
+                        .map(|g| {
+                            let search_title = Some(db::clean_search_title(&g.title));
+                            db::GameInsert {
+                                title: g.title,
+                                source: g.source,  // Use the source field from ScrapedGame
+                                file_size: g.file_size,
+                                magnet_link: g.download_link,
+                                genres: g.genres,
+                                company: g.company,
+                                original_size: g.original_size,
+                                thumbnail_url: g.thumbnail_url,
+                                screenshots: g.screenshots,
+                                source_url: g.source_url,
+                                post_date: g.post_date,
+                                search_title,
+                            }
                         })
                         .collect();
 
@@ -636,10 +775,8 @@ async fn rescrape(
                         }
                     }
                 }
-                Err(e) => {
-                    eprintln!("Scrape error: {}", e);
-                    format!("Scrape failed: {}", e)
-                }
+            } else {
+                "No games were scraped from any source".to_string()
             };
 
             let mut status = scrape_status.write().await;
@@ -664,6 +801,24 @@ async fn get_scrape_status(
 ) -> Json<ScrapeStatus> {
     let status = state.scrape_status.read().await;
     Json(status.clone())
+}
+
+#[derive(Serialize)]
+struct SourcesResponse {
+    sources: Vec<db::SourceStat>,
+}
+
+async fn get_sources(
+    State(state): State<AppState>,
+) -> Result<Json<SourcesResponse>, StatusCode> {
+    let stats = db::get_source_stats(&state.db)
+        .await
+        .map_err(|e| {
+            eprintln!("Error getting source stats: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(SourcesResponse { sources: stats }))
 }
 
 async fn add_to_realdebrid(
@@ -693,7 +848,8 @@ async fn add_to_realdebrid(
         state.rd_client.clone()
     };
 
-    match rd_client.process_magnet(&game.magnet_link).await {
+    // Use the universal process_link function that handles both magnets and DDL
+    match rd_client.process_link(&game.magnet_link).await {
         Ok(downloads) => {
             if downloads.is_empty() {
                 Ok(Json(ApiResponse {
@@ -875,6 +1031,131 @@ async fn mark_installed(
         })))
 }
 
+async fn validate_download(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<md5_validator::ValidationResult>, (StatusCode, String)> {
+    // Get download info to find the directory
+    let download = state.download_manager.get_download(id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, format!("Download not found: {}", e)))?;
+
+    let file_path = download.file_path
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Download has no file path".to_string()))?;
+
+    let dir = std::path::Path::new(&file_path);
+
+    if !dir.exists() {
+        return Err((StatusCode::NOT_FOUND, "Download directory does not exist".to_string()));
+    }
+
+    if !dir.is_dir() {
+        return Err((StatusCode::BAD_REQUEST, "Download path is not a directory".to_string()));
+    }
+
+    println!("Validating MD5 checksums for download {} in {}", id, dir.display());
+
+    md5_validator::validate_directory(dir)
+        .await
+        .map(Json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Validation error: {}", e)))
+}
+
+async fn delete_download(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    state.download_manager.delete_download(id)
+        .await
+        .map(|_| Json(ApiResponse {
+            success: true,
+            message: "Download and files deleted permanently".to_string(),
+            downloads: None,
+            download_id: None,
+        }))
+        .map_err(|e| (StatusCode::BAD_REQUEST, Json(ApiResponse {
+            success: false,
+            message: e.to_string(),
+            downloads: None,
+            download_id: None,
+        })))
+}
+
+async fn scan_existing_games(
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    match state.download_manager.scan_existing_games().await {
+        Ok(count) => {
+            Ok(Json(ApiResponse {
+                success: true,
+                message: format!("Scanned and imported {} existing game(s)", count),
+                downloads: None,
+                download_id: None,
+            }))
+        }
+        Err(e) => {
+            Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
+                success: false,
+                message: format!("Scan failed: {}", e),
+                downloads: None,
+                download_id: None,
+            })))
+        }
+    }
+}
+
+async fn download_file(
+    State(state): State<AppState>,
+    Path(file_id): Path<i64>,
+) -> Result<Response, (StatusCode, String)> {
+    // Get file info from database
+    let file_info: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT filename, file_path FROM download_files WHERE id = ?"
+    )
+    .bind(file_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+
+    let (filename, file_path) = file_info
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "File not found".to_string()))?;
+
+    let path = file_path
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "File path not available".to_string()))?;
+
+    let file_path = std::path::Path::new(&path);
+
+    if !file_path.exists() {
+        return Err((StatusCode::NOT_FOUND, "File does not exist on disk".to_string()));
+    }
+
+    // Open the file
+    let file = tokio::fs::File::open(&file_path)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to open file: {}", e)))?;
+
+    // Get file size
+    let metadata = file.metadata()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read metadata: {}", e)))?;
+    let file_size = metadata.len();
+
+    // Create a stream
+    let stream = ReaderStream::new(file);
+    let body = Body::from_stream(stream);
+
+    // Build response with appropriate headers
+    let content_disposition = format!("attachment; filename=\"{}\"", filename);
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_DISPOSITION, content_disposition)
+        .header(header::CONTENT_LENGTH, file_size.to_string())
+        .body(body)
+        .unwrap())
+}
+
 // ─── Settings ───
 
 #[derive(Serialize)]
@@ -966,5 +1247,56 @@ async fn save_settings(
         message: "Settings saved".to_string(),
         downloads: None,
         download_id: None,
+    }))
+}
+
+/// Get current system information
+async fn get_system_info(
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    let system_info = system_info::SystemInfo::gather().await;
+
+    // Save to database
+    let _ = db::insert_system_check(
+        &state.db,
+        Some(system_info.ram_available_gb),
+        Some(system_info.temp_space_gb),
+        Some(system_info.cpu_cores),
+        Some(system_info.antivirus_active),
+        if system_info.missing_dlls.is_empty() {
+            None
+        } else {
+            Some(system_info.missing_dlls.join(", "))
+        },
+        if system_info.missing_dependencies.is_empty() {
+            None
+        } else {
+            Some(system_info.missing_dependencies.join(", "))
+        },
+        Some(format!("{:?}", system_info.overall_status)),
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "ram_total_gb": system_info.ram_total_gb,
+        "ram_available_gb": system_info.ram_available_gb,
+        "temp_space_gb": system_info.temp_space_gb,
+        "cpu_cores": system_info.cpu_cores,
+        "antivirus_active": system_info.antivirus_active,
+        "missing_dlls": system_info.missing_dlls,
+        "missing_dependencies": system_info.missing_dependencies,
+        "overall_status": system_info.overall_status,
+        "issues": system_info.get_issues(),
+        "recommendations": system_info.get_recommendations(),
+    }))
+}
+
+async fn health_check(
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    let db_ok = sqlx::query("SELECT 1").execute(&state.db).await.is_ok();
+    Json(serde_json::json!({
+        "status": if db_ok { "ok" } else { "degraded" },
+        "db": db_ok,
     }))
 }

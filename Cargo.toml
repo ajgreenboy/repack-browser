@@ -16,7 +16,9 @@ csv = "1.3"
 chrono = "0.4"
 regex = "1.10"
 futures = "0.3"
+url = "2.5"
 urlencoding = "2.1"
+async-trait = "0.1"
 
 # For downloads
 tokio-util = { version = "0.7", features = ["io"] }
@@ -24,6 +26,13 @@ bytes = "1.5"
 
 # For extraction
 zip = "0.6"
+md-5 = "0.10"
+
+# System information
+num_cpus = "1.16"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["sysinfoapi", "fileapi", "winbase"] }
 
 # Windows-specific: hide console window for release builds
 [target.'cfg(windows)'.build-dependencies]

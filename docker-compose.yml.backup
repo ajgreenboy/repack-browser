@@ -3,17 +3,16 @@ services:
     build: .
     container_name: fitgirl-browser
     restart: unless-stopped
-    user: "1000:1000"  # Run as user al to fix file ownership
     ports:
       - "3030:3000"
     volumes:
       - ./data:/app/data
-      - /mnt/storage/games:/app/downloads
+      - ./downloads:/app/downloads
     environment:
       - DATABASE_PATH=sqlite:/app/data/games.db?mode=rwc
       - DOWNLOAD_DIR=/app/downloads
       - AUTO_EXTRACT=true
-      - DELETE_ARCHIVES=true
+      - DELETE_ARCHIVES=false
       # Set API keys here or use the Settings UI
       # - RD_API_KEY=your_key_here
       # - RAWG_API_KEY=your_key_here

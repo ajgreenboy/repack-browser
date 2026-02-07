@@ -24,7 +24,6 @@ pub struct DownloadInfo {
     pub created_at: String,
     pub completed_at: Option<String>,
     pub files: Vec<DownloadFileInfo>,
-    pub has_md5: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -230,18 +229,6 @@ impl DownloadManager {
                 None
             };
 
-            // Check if MD5 file exists for completed downloads
-            let has_md5 = if let Some(ref path) = row.file_path {
-                if row.status == "completed" || row.status == "installed" {
-                    let dir = std::path::Path::new(path);
-                    crate::md5_validator::find_md5_file(dir).await.is_some()
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-
             downloads.push(DownloadInfo {
                 id: row.id,
                 game_id: row.game_id,
@@ -264,7 +251,6 @@ impl DownloadManager {
                     file_path: f.file_path,
                     is_extracted: f.is_extracted,
                 }).collect(),
-                has_md5,
             });
         }
 
@@ -429,120 +415,6 @@ impl DownloadManager {
             None => Err("Download not found".into()),
         }
     }
-
-    /// Scan /mnt/storage/games for existing game directories and import them as downloads
-    pub async fn scan_existing_games(&self) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-        let download_dir = self.downloader.download_dir();
-        let mut entries = tokio::fs::read_dir(&download_dir).await?;
-        let mut imported = 0;
-
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-
-            // Skip if not a directory
-            if !path.is_dir() {
-                continue;
-            }
-
-            let dir_name = match path.file_name() {
-                Some(name) => name.to_string_lossy().to_string(),
-                None => continue,
-            };
-
-            // Check if this directory is already tracked in downloads
-            let existing: Option<(i64,)> = sqlx::query_as(
-                "SELECT id FROM downloads WHERE file_path = ?"
-            )
-            .bind(path.to_string_lossy().as_ref())
-            .fetch_optional(&self.db)
-            .await?;
-
-            if existing.is_some() {
-                continue; // Already tracked
-            }
-
-            // Try to find matching game by title
-            let game_id: Option<i64> = {
-                // Try exact match first
-                let exact: Option<(i64,)> = sqlx::query_as(
-                    "SELECT id FROM games WHERE title LIKE ?"
-                )
-                .bind(format!("%{}%", dir_name))
-                .fetch_optional(&self.db)
-                .await?;
-
-                exact.map(|(id,)| id)
-            };
-
-            // Look for installer
-            let installer_path = find_installer(&path).await;
-
-            // Create download record
-            let now = chrono::Utc::now().to_rfc3339();
-            let result = sqlx::query(
-                "INSERT INTO downloads (game_id, status, progress, file_path, installer_path, created_at, completed_at)
-                 VALUES (?, 'completed', 100.0, ?, ?, ?, ?)"
-            )
-            .bind(game_id.unwrap_or(-1)) // Use -1 for unknown games
-            .bind(path.to_string_lossy().as_ref())
-            .bind(installer_path.as_ref().map(|p| p.to_string_lossy().to_string()))
-            .bind(&now)
-            .bind(&now)
-            .execute(&self.db)
-            .await?;
-
-            println!("Imported existing game: {}", dir_name);
-            imported += 1;
-        }
-
-        Ok(imported)
-    }
-
-    /// Permanently delete a download and its files from disk
-    pub async fn delete_download(&self, download_id: i64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Get download info
-        let row: Option<(String, Option<String>)> = sqlx::query_as(
-            "SELECT status, file_path FROM downloads WHERE id = ?"
-        )
-        .bind(download_id)
-        .fetch_optional(&self.db)
-        .await?;
-
-        let (status, file_path) = row.ok_or("Download not found")?;
-
-        // Only allow deletion of completed, failed, or installed downloads
-        if !["completed", "failed", "installed", "installing"].contains(&status.as_str()) {
-            return Err(format!("Cannot delete download with status '{}'. Cancel it first.", status).into());
-        }
-
-        // Delete files from disk if path exists
-        if let Some(path_str) = file_path {
-            let path = std::path::Path::new(&path_str);
-            if path.exists() {
-                println!("Deleting files at: {}", path.display());
-                if path.is_dir() {
-                    tokio::fs::remove_dir_all(&path).await?;
-                } else {
-                    tokio::fs::remove_file(&path).await?;
-                }
-                println!("Deleted: {}", path.display());
-            }
-        }
-
-        // Delete download files records
-        sqlx::query("DELETE FROM download_files WHERE download_id = ?")
-            .bind(download_id)
-            .execute(&self.db)
-            .await?;
-
-        // Delete download record
-        sqlx::query("DELETE FROM downloads WHERE id = ?")
-            .bind(download_id)
-            .execute(&self.db)
-            .await?;
-
-        Ok(())
-    }
 }
 
 /// Process a single download: RD → download files → extract
@@ -562,16 +434,8 @@ async fn process_download(
     update_download_status(db, download_id, "downloading", None).await?;
 
     // Step 1: Process magnet through Real-Debrid
-    // Get API key from database (takes priority over env var)
-    let api_key = db::get_setting(db, "rd_api_key").await.ok().flatten()
-        .filter(|k| !k.is_empty())
-        .ok_or("Real-Debrid API key not set. Please configure it in Settings.")?;
-    
-    // Create RD client with fresh API key from database
-    let rd_client = crate::realdebrid::RealDebridClient::new(api_key);
-
-    println!("  Processing download link with Real-Debrid...");
-    let rd_downloads = rd_client.process_link(&game.magnet_link).await
+    println!("  Adding magnet to Real-Debrid...");
+    let rd_downloads = rd_client.process_magnet(&game.magnet_link).await
         .map_err(|e| format!("Real-Debrid error: {}", e))?;
 
     if rd_downloads.is_empty() {
@@ -686,22 +550,6 @@ async fn process_download(
             // Clear extraction progress
             extractor.clear_progress(download_id).await;
 
-            // Validate extraction: check if any .exe files were extracted
-            println!("  Validating extraction...");
-            match validate_extraction(&game_dir).await {
-                Ok(true) => {
-                    println!("  ✓ Extraction validated - found installer executable(s)");
-                }
-                Ok(false) => {
-                    let warning = "Extraction completed but no .exe installer found. Files may still be compressed.";
-                    eprintln!("  ⚠ Warning: {}", warning);
-                    // Don't fail, but log the issue in case manual intervention is needed
-                }
-                Err(e) => {
-                    eprintln!("  ⚠ Warning: Extraction validation error: {}", e);
-                }
-            }
-
             // Delete archives after extraction if configured
             if config.delete_archives {
                 for archive in &archives {
@@ -766,49 +614,6 @@ fn sanitize_filename(name: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
-}
-
-/// Validate that extraction actually produced executable files.
-/// Returns Ok(true) if .exe files are found, Ok(false) if not, Err on filesystem errors.
-async fn validate_extraction(dir: &std::path::Path) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    Ok(has_exe_files(dir).await)
-}
-
-/// Recursively check if a directory contains any .exe files
-async fn has_exe_files(dir: &std::path::Path) -> bool {
-    match scan_for_exe(dir, 0, 3).await {
-        Ok(found) => found,
-        Err(_) => false,
-    }
-}
-
-/// Recursively scan for .exe files up to a maximum depth
-fn scan_for_exe(dir: &std::path::Path, current_depth: usize, max_depth: usize) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, std::io::Error>> + Send + '_>> {
-    Box::pin(async move {
-        if current_depth > max_depth {
-            return Ok(false);
-        }
-
-        let mut entries = tokio::fs::read_dir(dir).await?;
-
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-
-            if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if ext.eq_ignore_ascii_case("exe") {
-                        return Ok(true);
-                    }
-                }
-            } else if path.is_dir() {
-                if scan_for_exe(&path, current_depth + 1, max_depth).await? {
-                    return Ok(true);
-                }
-            }
-        }
-
-        Ok(false)
-    })
 }
 
 /// Recursively search a directory for installer executables.

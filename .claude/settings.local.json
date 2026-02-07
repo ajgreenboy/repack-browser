@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(docker compose down:*)",
+      "Bash(where:*)",
+      "Bash(ls:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)",
+      "WebSearch",
+      "WebFetch(domain:steamrip.com)",
+      "Bash(cargo check:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd system information module for pre-installation checks\n\n- Created system_info.rs module to gather system data\n- Added RAM detection \\(total and available\\)\n- Added disk space detection for temp directory  \n- Added CPU core count detection\n- Added antivirus detection \\(Windows Defender\\)\n- Added DLL checking \\(unarc.dll, ISDone.dll\\)\n- Added dependency checking \\(DirectX, .NET, VC++ Redistributables\\)\n- Created SystemInfo struct with status calculation\n- Added database functions for storing system checks\n- Added /api/system-info endpoint\n- Added num_cpus and winapi dependencies\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git config --global --add safe.directory '%\\(prefix\\)///192.168.1.29/al-home/fitgirl-scraper')"
+    ]
+  }
+}

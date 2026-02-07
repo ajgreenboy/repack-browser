@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use std::time::Duration;
 use tokio::time::sleep;
+use std::collections::HashSet;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AddMagnetResponse {
@@ -28,6 +29,20 @@ pub struct DownloadLink {
     pub filename: String,
     pub download_url: String,
     pub size: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HostInfo {
+    id: String,
+    name: String,
+    #[serde(default)]
+    supported: i32,
+}
+
+#[derive(Debug, Deserialize)]
+struct HostsResponse {
+    #[serde(flatten)]
+    hosts: std::collections::HashMap<String, HostInfo>,
 }
 
 pub struct RealDebridClient {
@@ -180,5 +195,73 @@ impl RealDebridClient {
         }
         
         Ok(downloads)
+    }
+
+    /// Process a direct download link (DDL) through Real-Debrid
+    /// This is simpler than magnet - just unrestrict the link
+    pub async fn process_ddl(&self, ddl_link: &str) -> Result<Vec<DownloadLink>, Box<dyn std::error::Error>> {
+        println!("Processing DDL link...");
+
+        // Unrestrict the direct download link
+        let unrestricted = self.unrestrict_link(ddl_link).await?;
+        println!("Unrestricted DDL: {}", unrestricted.filename);
+
+        Ok(vec![DownloadLink {
+            filename: unrestricted.filename,
+            download_url: unrestricted.download,
+            size: None,
+        }])
+    }
+
+    /// Universal link processor that handles both magnet and DDL
+    /// Auto-detects the link type based on the URL prefix
+    pub async fn process_link(&self, link: &str) -> Result<Vec<DownloadLink>, Box<dyn std::error::Error>> {
+        if link.starts_with("magnet:") {
+            self.process_magnet(link).await
+        } else {
+            self.process_ddl(link).await
+        }
+    }
+
+    /// Get list of supported file hosters from Real-Debrid
+    pub async fn get_supported_hosts(&self) -> Result<HashSet<String>, Box<dyn std::error::Error>> {
+        let response = self.client
+            .get("https://api.real-debrid.com/rest/1.0/hosts")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err("Failed to get supported hosts".into());
+        }
+
+        let hosts_data: Vec<HostInfo> = response.json().await?;
+
+        // Collect all supported host domains
+        let mut supported = HashSet::new();
+        for host in hosts_data {
+            if host.supported == 1 {
+                // Add the main domain
+                supported.insert(host.id.to_lowercase());
+                supported.insert(host.name.to_lowercase());
+            }
+        }
+
+        Ok(supported)
+    }
+
+    /// Check if a URL is from a supported hoster (static method, doesn't need API key)
+    pub fn is_supported_hoster(url: &str, supported_hosts: &HashSet<String>) -> bool {
+        if let Ok(parsed_url) = url::Url::parse(url) {
+            if let Some(domain) = parsed_url.host_str() {
+                // Check if any supported host matches this domain
+                for supported_host in supported_hosts {
+                    if domain.contains(supported_host) || supported_host.contains(domain) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 }

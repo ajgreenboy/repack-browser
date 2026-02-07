@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::RwLock;
 use tokio::fs;
 
@@ -24,12 +23,6 @@ pub struct ExtractionProgress {
     pub percent: f64,
     /// Human readable status message
     pub message: String,
-    /// Extraction speed (files per second)
-    pub speed: f64,
-    /// Elapsed time in seconds
-    pub elapsed_secs: f64,
-    /// Estimated time remaining in seconds
-    pub eta_secs: Option<f64>,
 }
 
 impl Default for ExtractionProgress {
@@ -40,9 +33,6 @@ impl Default for ExtractionProgress {
             files_total: 0,
             percent: 0.0,
             message: "Starting extraction...".to_string(),
-            speed: 0.0,
-            elapsed_secs: 0.0,
-            eta_secs: None,
         }
     }
 }
@@ -369,38 +359,17 @@ fn short_filename(name: &str) -> String {
 
 /// Find the 7-Zip executable
 fn find_7zip() -> Option<String> {
-    // On Linux, check for 7z or 7zr in common locations
-    #[cfg(target_os = "linux")]
-    {
-        let common_paths = [
-            "/usr/bin/7z",
-            "/usr/bin/7zr",
-            "/usr/local/bin/7z",
-        ];
+    let common_paths = [
+        r"C:\Program Files\7-Zip\7z.exe",
+        r"C:\Program Files (x86)\7-Zip\7z.exe",
+    ];
 
-        for path in &common_paths {
-            if std::path::Path::new(path).exists() {
-                return Some(path.to_string());
-            }
+    for path in &common_paths {
+        if std::path::Path::new(path).exists() {
+            return Some(path.to_string());
         }
     }
 
-    // On Windows, check Program Files
-    #[cfg(target_os = "windows")]
-    {
-        let common_paths = [
-            r"C:\Program Files\7-Zip\7z.exe",
-            r"C:\Program Files (x86)\7-Zip\7z.exe",
-        ];
-
-        for path in &common_paths {
-            if std::path::Path::new(path).exists() {
-                return Some(path.to_string());
-            }
-        }
-    }
-
-    // Try PATH
     if which_7z().is_some() {
         return Some("7z".to_string());
     }

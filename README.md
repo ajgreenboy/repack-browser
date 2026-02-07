@@ -2,9 +2,20 @@
 
 A self-hosted web app for browsing, searching, and managing FitGirl Repacks. Scrapes the FitGirl site for game metadata, images, and magnet links, with optional Real-Debrid integration for direct download links.
 
+## Screenshots
+
+### Library View
+![Library View](Screenshots/home.png)
+
+### Game Details
+![Game Details](Screenshots/gamedlpage.png)
+
+### Download Links
+![Download Links](Screenshots/links.png)
+
 ## Features
 
-- Scrapes ~3500 games with metadata (genres, developer, screenshots, file sizes)
+- Scrapes ~7500 games with metadata (genres, developer, screenshots, file sizes)
 - Search, genre filtering, sorting (date, title, size)
 - Favorites system
 - Random game picker
