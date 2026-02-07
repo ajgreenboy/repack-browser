@@ -4,6 +4,7 @@ mod download_manager;
 mod extractor;
 mod installation_assistant;
 mod installation_checker;
+mod installation_monitor;
 mod md5_validator;
 mod rawg;
 mod realdebrid;
@@ -227,6 +228,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/assistant/add-exclusion", post(assistant_add_exclusion))
         .route("/api/assistant/toggle-av", post(assistant_toggle_av))
         .route("/api/assistant/dependency-info/:dep", get(get_dependency_info))
+        // Installation monitoring
+        .route("/api/installation/logs/:game_id", get(get_installation_history))
+        .route("/api/installation/stats", get(get_installation_stats))
+        .route("/api/installation/analyze/:log_id", get(analyze_failed_installation))
         // Health check
         .route("/api/health", get(health_check))
         // Static files
@@ -1418,6 +1423,55 @@ async fn get_dependency_info(
             format!("No installer information available for: {}", dep),
         )),
     }
+}
+
+// ─── Installation Monitoring Handlers ───
+
+async fn get_installation_history(
+    State(state): State<AppState>,
+    Path(game_id): Path<i64>,
+) -> Result<Json<Vec<db::InstallationLog>>, (StatusCode, String)> {
+    match installation_monitor::get_installation_history(&state.db, game_id).await {
+        Ok(logs) => Ok(Json(logs)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to get installation history: {}", e),
+        )),
+    }
+}
+
+async fn get_installation_stats(
+    State(state): State<AppState>,
+) -> Result<Json<installation_monitor::InstallationStats>, (StatusCode, String)> {
+    match installation_monitor::get_installation_stats(&state.db).await {
+        Ok(stats) => Ok(Json(stats)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to get installation stats: {}", e),
+        )),
+    }
+}
+
+async fn analyze_failed_installation(
+    State(state): State<AppState>,
+    Path(log_id): Path<i64>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Get the log
+    let logs = installation_monitor::get_all_installation_logs(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let log = logs
+        .iter()
+        .find(|l| l.id == log_id)
+        .ok_or((StatusCode::NOT_FOUND, "Installation log not found".to_string()))?;
+
+    let recommendations = installation_monitor::analyze_installation_failure(log);
+
+    Ok(Json(serde_json::json!({
+        "log": log,
+        "recommendations": recommendations,
+    })))
 }
 
 async fn health_check(
