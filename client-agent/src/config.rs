@@ -47,9 +47,9 @@ impl Default for Config {
                     .unwrap_or_else(|| "Unknown PC".to_string()),
             },
             server: ServerConfig {
-                url: "http://homelab:3000".to_string(),
+                url: "http://homelab:3030".to_string(),
                 enabled: true,
-                poll_interval_secs: 10,
+                poll_interval_secs: 30,
             },
             extraction: ExtractionConfig {
                 output_dir: PathBuf::from("C:\\Games"),

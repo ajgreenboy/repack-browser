@@ -39,9 +39,14 @@ winapi = { version = "0.3", features = [
     "winuser", "wincon", "shellapi", "processthreadsapi",
     "sysinfoapi", "memoryapi", "fileapi", "winbase"
 ] }
+winreg = "0.52"
 
 # System tray
 tray-item = "0.10"
+
+# GUI
+eframe = "0.29"
+rfd = "0.15"
 
 # Configuration file
 toml = "0.8"

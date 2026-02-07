@@ -1,5 +1,8 @@
+mod client_id;
 mod config;
 mod extractor;
+mod server_client;
+mod system_info;
 
 use config::Config;
 use eframe::egui;

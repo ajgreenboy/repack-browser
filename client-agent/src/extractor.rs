@@ -59,10 +59,12 @@ impl Extractor {
         let mut archive = zip::ZipArchive::new(file)?;
 
         // Calculate total size
-        let total_size: u64 = (0..archive.len())
-            .filter_map(|i| archive.by_index(i).ok())
-            .map(|f| f.size())
-            .sum();
+        let mut total_size: u64 = 0;
+        for i in 0..archive.len() {
+            if let Ok(file) = archive.by_index(i) {
+                total_size += file.size();
+            }
+        }
 
         {
             let mut prog = self.progress.write().await;
