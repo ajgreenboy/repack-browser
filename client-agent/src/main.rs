@@ -508,111 +508,110 @@ async fn process_single_download(state: Arc<AppState>, game_id: i64) -> Result<(
 
     Ok(())
 }
-
-/// Poll the server for new downloads in the queue (OLD ARCHITECTURE - to be removed)
-async fn poll_server_queue(state: Arc<AppState>) {
-    let mut interval = time::interval(Duration::from_secs(60)); // Poll every 60 seconds
-
-    loop {
-        interval.tick().await;
-
-        // Check if server is enabled
-        let config = state.config.read().await;
-        if !config.server.enabled {
-            continue;
-        }
-        let client_id = config.client.id.clone();
-        let output_dir = config.extraction.output_dir.clone();
-        drop(config);
-
-        // Get queue from server
-        match state.server_client.get_download_queue(&client_id).await {
-            Ok(queue) => {
-                if !queue.is_empty() {
-                    info!("Found {} items in download queue", queue.len());
-
-                    for item in queue {
-                        info!("Processing: {} (status: {})", item.game_title, item.status);
-
-                        // Update status
-                        {
-                            let mut status = state.status.write().await;
-                            *status = format!("Processing download: {}", item.game_title);
-                        }
-
-                        // If status is 'completed', the file is ready for extraction
-                        if item.status == "completed" && !item.file_path.is_empty() {
-                            let file_path = std::path::Path::new(&item.file_path);
-
-                            if file_path.exists() {
-                                info!("Extracting: {}", item.game_title);
-
-                                // Update status
-                                {
-                                    let mut status = state.status.write().await;
-                                    *status = format!("Extracting: {}", item.game_title);
-                                }
-
-                                // Extract the archive
-                                let extract_result = if file_path.extension()
-                                    .and_then(|e| e.to_str())
-                                    .map(|e| e.to_lowercase() == "zip")
-                                    .unwrap_or(false)
-                                {
-                                    extract_zip(file_path, &output_dir).await
-                                } else if file_path.extension()
-                                    .and_then(|e| e.to_str())
-                                    .map(|e| e.to_lowercase() == "7z")
-                                    .unwrap_or(false)
-                                {
-                                    extract_7z(file_path, &output_dir).await
-                                } else {
-                                    Err(format!("Unsupported archive format: {:?}", file_path))
-                                };
-
-                                match extract_result {
-                                    Ok(_) => {
-                                        info!("Extraction completed: {}", item.game_title);
-                                        let mut status = state.status.write().await;
-                                        *status = format!("✅ Extracted: {}", item.game_title);
-
-                                        // Show notification
-                                        let title_clone = item.game_title.clone();
-                                        tokio::task::spawn_blocking(move || {
-                                            show_notification(
-                                                "Extraction Complete",
-                                                &format!("{} has been extracted and is ready for installation.", title_clone)
-                                            );
-                                        });
-
-                                        // TODO: Report extraction completion to server
-                                    }
-                                    Err(e) => {
-                                        error!("Extraction failed: {}", e);
-                                        let mut status = state.status.write().await;
-                                        *status = format!("❌ Extraction failed: {}", item.game_title);
-
-                                        // Show error notification
-                                        let title_clone = item.game_title.clone();
-                                        tokio::task::spawn_blocking(move || {
-                                            show_notification(
-                                                "Extraction Failed",
-                                                &format!("Failed to extract {}. Check logs for details.", title_clone)
-                                            );
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("Failed to get download queue: {}", e);
-            }
-        }
-    }
-}
+// 
+// /// Poll the server for new downloads in the queue (OLD ARCHITECTURE - to be removed)
+// async fn poll_server_queue(state: Arc<AppState>) {
+//     let mut interval = time::interval(Duration::from_secs(60)); // Poll every 60 seconds
+// 
+//     loop {
+//         interval.tick().await;
+// 
+//         // Check if server is enabled
+//         let config = state.config.read().await;
+//         if !config.server.enabled {
+//             continue;
+//         }
+//         let client_id = config.client.id.clone();
+//         let output_dir = config.extraction.output_dir.clone();
+//         drop(config);
+// 
+//         // Get queue from server
+//         match state.server_client.get_download_queue(&client_id).await {
+//             Ok(queue) => {
+//                 if !queue.is_empty() {
+//                     info!("Found {} items in download queue", queue.len());
+// 
+//                     for item in queue {
+//                         info!("Processing: {} (status: {})", item.game_title, item.status);
+// 
+//                         // Update status
+//                         {
+//                             let mut status = state.status.write().await;
+//                             *status = format!("Processing download: {}", item.game_title);
+//                         }
+// 
+//                         // If status is 'completed', the file is ready for extraction
+//                         if item.status == "completed" && !item.file_path.is_empty() {
+//                             let file_path = std::path::Path::new(&item.file_path);
+// 
+//                             if file_path.exists() {
+//                                 info!("Extracting: {}", item.game_title);
+// 
+//                                 // Update status
+//                                 {
+//                                     let mut status = state.status.write().await;
+//                                     *status = format!("Extracting: {}", item.game_title);
+//                                 }
+// 
+//                                 // Extract the archive
+//                                 let extract_result = if file_path.extension()
+//                                     .and_then(|e| e.to_str())
+//                                     .map(|e| e.to_lowercase() == "zip")
+//                                     .unwrap_or(false)
+//                                 {
+//                                     extract_zip(file_path, &output_dir).await
+//                                 } else if file_path.extension()
+//                                     .and_then(|e| e.to_str())
+//                                     .map(|e| e.to_lowercase() == "7z")
+//                                     .unwrap_or(false)
+//                                 {
+//                                     extract_7z(file_path, &output_dir).await
+//                                 } else {
+//                                     Err(format!("Unsupported archive format: {:?}", file_path))
+//                                 };
+// 
+//                                 match extract_result {
+//                                     Ok(_) => {
+//                                         info!("Extraction completed: {}", item.game_title);
+//                                         let mut status = state.status.write().await;
+//                                         *status = format!("✅ Extracted: {}", item.game_title);
+// 
+//                                         // Show notification
+//                                         let title_clone = item.game_title.clone();
+//                                         tokio::task::spawn_blocking(move || {
+//                                             show_notification(
+//                                                 "Extraction Complete",
+//                                                 &format!("{} has been extracted and is ready for installation.", title_clone)
+//                                             );
+//                                         });
+// 
+//                                         // TODO: Report extraction completion to server
+//                                     }
+//                                     Err(e) => {
+//                                         error!("Extraction failed: {}", e);
+//                                         let mut status = state.status.write().await;
+//                                         *status = format!("❌ Extraction failed: {}", item.game_title);
+// 
+//                                         // Show error notification
+//                                         let title_clone = item.game_title.clone();
+//                                         tokio::task::spawn_blocking(move || {
+//                                             show_notification(
+//                                                 "Extraction Failed",
+//                                                 &format!("Failed to extract {}. Check logs for details.", title_clone)
+//                                             );
+//                                         });
+//                                     }
+//                                 }
+//                             }
+//                         }
+//                     }
+//                 }
+//             }
+//             Err(e) => {
+//                 warn!("Failed to get download queue: {}", e);
+//             }
+//         }
+//     }
 
 async fn monitor_downloads(state: Arc<AppState>) {
     let mut interval = time::interval(Duration::from_secs(10));

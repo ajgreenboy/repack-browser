@@ -75,23 +75,27 @@ impl Extractor {
         let start_time = std::time::Instant::now();
 
         for i in 0..archive.len() {
-            let mut file = archive.by_index(i)?;
-            let outpath = output_dir.join(file.name());
+            let file_size = {
+                let mut file = archive.by_index(i)?;
+                let outpath = output_dir.join(file.name());
 
-            if file.name().ends_with('/') {
-                std::fs::create_dir_all(&outpath)?;
-            } else {
-                if let Some(p) = outpath.parent() {
-                    std::fs::create_dir_all(p)?;
+                if file.name().ends_with('/') {
+                    std::fs::create_dir_all(&outpath)?;
+                    0
+                } else {
+                    if let Some(p) = outpath.parent() {
+                        std::fs::create_dir_all(p)?;
+                    }
+
+                    let mut outfile = File::create(&outpath)?;
+                    std::io::copy(&mut file, &mut outfile)?;
+                    file.size()
                 }
+            }; // Drop file here before await
 
-                let mut outfile = File::create(&outpath)?;
-                std::io::copy(&mut file, &mut outfile)?;
-            }
+            extracted += file_size;
 
-            extracted += file.size();
-
-            // Update progress
+            // Update progress (file is dropped, safe to await)
             {
                 let mut prog = self.progress.write().await;
                 prog.extracted_bytes = extracted;

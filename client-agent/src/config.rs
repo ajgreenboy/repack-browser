@@ -24,17 +24,17 @@ pub struct ServerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RealDebridConfig {
+    pub api_key: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractionConfig {
     pub output_dir: PathBuf,
     pub watch_dir: PathBuf,
     pub delete_after_extract: bool,
     pub verify_md5: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RealDebridConfig {
-    pub api_key: String,
-    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,9 +45,12 @@ pub struct MonitoringConfig {
 
 impl Default for Config {
     fn default() -> Self {
+        let default_watch_dir = dirs::download_dir()
+            .unwrap_or_else(|| PathBuf::from(r"C:\Users\Public\Downloads"));
+        
         Self {
             client: ClientConfig {
-                id: String::new(), // Will be generated
+                id: String::new(),
                 name: hostname::get()
                     .ok()
                     .and_then(|h| h.into_string().ok())
@@ -59,15 +62,12 @@ impl Default for Config {
                 poll_interval_secs: 30,
             },
             realdebrid: RealDebridConfig {
-                api_key: String::new(), // Must be configured by user
-                enabled: false, // Disabled until API key is set
+                api_key: String::new(),
+                enabled: false,
             },
             extraction: ExtractionConfig {
-                output_dir: PathBuf::from("C:\\Games"),
-                watch_dir: PathBuf::from(
-                    dirs::download_dir()
-                        .unwrap_or_else(|| PathBuf::from("C:\\Users\\Public\\Downloads"))
-                ),
+                output_dir: PathBuf::from(r"C:\Games"),
+                watch_dir: default_watch_dir,
                 delete_after_extract: false,
                 verify_md5: true,
             },

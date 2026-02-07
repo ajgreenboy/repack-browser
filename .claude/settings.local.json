@@ -28,7 +28,8 @@
       "Bash(git pull:*)",
       "Bash(git fetch:*)",
       "Bash(git merge:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(rustup target add:*)"
     ]
   }
 }

@@ -19,7 +19,7 @@ pub async fn poll_and_process_downloads(
     poll_interval_secs: u64,
 ) {
     let mut interval = time::interval(Duration::from_secs(poll_interval_secs));
-    let downloader = Arc::new(Downloader::new(output_dir.to_path_buf()));
+    let downloader = Arc::new(Downloader::new());
 
     loop {
         interval.tick().await;
@@ -76,10 +76,11 @@ async fn process_single_download(
         info!("Downloading file {}/{}", idx + 1, download.direct_urls.len());
 
         // Extract filename from URL
+        let default_name = format!("file_{}.bin", idx);
         let filename = url.split('/').last()
-            .unwrap_or(&format!("file_{}.bin", idx))
+            .unwrap_or(&default_name)
             .split('?').next()
-            .unwrap_or(&format!("file_{}.bin", idx));
+            .unwrap_or(&default_name);
 
         let file_path = output_dir.join(filename);
 
