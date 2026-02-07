@@ -29,7 +29,10 @@
       "Bash(git fetch:*)",
       "Bash(git merge:*)",
       "Bash(git commit:*)",
-      "Bash(rustup target add:*)"
+      "Bash(rustup target add:*)",
+      "Bash(gh release create:*)",
+      "Bash(__NEW_LINE_15020f7159016402__ **Architecture:**)",
+      "Bash(echo:*)"
     ]
   }
 }

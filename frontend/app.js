@@ -144,10 +144,12 @@ function showView(view) {
     document.getElementById('homeView').classList.toggle('hidden', view !== 'home');
     document.getElementById('gamesView').classList.toggle('hidden', view !== 'games');
     document.getElementById('downloadsView').classList.toggle('hidden', view !== 'downloads');
+    document.getElementById('clientsView').classList.toggle('hidden', view !== 'clients');
     document.getElementById('systemHealthView').classList.toggle('hidden', view !== 'systemHealth');
     document.getElementById('navHome').classList.toggle('active', view === 'home');
     document.getElementById('navGames').classList.toggle('active', view === 'games');
     document.getElementById('navDownloads').classList.toggle('active', view === 'downloads');
+    document.getElementById('navClients').classList.toggle('active', view === 'clients');
     document.getElementById('navSystemHealth').classList.toggle('active', view === 'systemHealth');
 
     if (view === 'downloads') {
@@ -159,6 +161,10 @@ function showView(view) {
 
     if (view === 'systemHealth') {
         loadSystemHealth();
+    }
+
+    if (view === 'clients') {
+        loadClients();
     }
 }
 
@@ -1573,6 +1579,137 @@ async function saveSettings() {
     } catch (error) {
         showToast('Failed to save settings', 'error');
     }
+}
+
+// ─── Client Management ───
+
+async function loadClients() {
+    const linkedContainer = document.getElementById('linkedClientsList');
+    const unlinkedContainer = document.getElementById('unlinkedClientsList');
+
+    try {
+        const response = await fetch(`${API_BASE}/clients/mine`, {
+            credentials: 'include'
+        });
+        const data = await response.json();
+
+        if (data.linked && data.unlinked) {
+            // Render linked clients
+            if (data.linked.length === 0) {
+                linkedContainer.innerHTML = `
+                    <div class="empty-state">
+                        <p>No linked clients</p>
+                        <p>Link a client below to start receiving downloads on your PC.</p>
+                    </div>
+                `;
+            } else {
+                linkedContainer.innerHTML = data.linked.map(client => renderClientCard(client, true)).join('');
+            }
+
+            // Render unlinked clients
+            if (data.unlinked.length === 0) {
+                unlinkedContainer.innerHTML = `
+                    <div class="empty-state">
+                        <p>No available clients</p>
+                        <p>Make sure the Repack Client is running on your PC and has connected to the server at least once.</p>
+                    </div>
+                `;
+            } else {
+                unlinkedContainer.innerHTML = data.unlinked.map(client => renderClientCard(client, false)).join('');
+            }
+        } else {
+            throw new Error('Invalid response from server');
+        }
+    } catch (error) {
+        console.error('Failed to load clients:', error);
+        linkedContainer.innerHTML = `<div class="empty-state"><p style="color:var(--red);">Failed to load clients</p></div>`;
+        unlinkedContainer.innerHTML = `<div class="empty-state"><p style="color:var(--red);">Failed to load clients</p></div>`;
+    }
+}
+
+function renderClientCard(client, isLinked) {
+    const statusColor = client.is_online ? 'var(--green)' : 'var(--text-dim)';
+    const statusText = client.is_online ? 'Online' : 'Offline';
+    const statusIcon = client.is_online ? '🟢' : '⚪';
+
+    return `
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;margin-bottom:0.75rem;">
+            <div style="display:flex;justify-content:space-between;align-items:start;gap:1rem;">
+                <div style="flex:1;">
+                    <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
+                        <h4 style="font-size:1rem;font-weight:600;color:var(--text);">${escapeHtml(client.client_name || 'Unnamed Client')}</h4>
+                        <span style="font-size:0.75rem;color:${statusColor};display:flex;align-items:center;gap:0.25rem;">
+                            ${statusIcon} ${statusText}
+                        </span>
+                    </div>
+                    <div style="font-size:0.8rem;color:var(--text-dim);font-family:'JetBrains Mono',monospace;margin-bottom:0.25rem;">
+                        ID: ${escapeHtml(client.client_id)}
+                    </div>
+                </div>
+                <div style="display:flex;gap:0.5rem;">
+                    ${isLinked ? `
+                        <button onclick="unlinkClient('${escapeHtml(client.client_id)}')" class="btn btn-secondary" style="flex:0;white-space:nowrap;">
+                            Unlink
+                        </button>
+                    ` : `
+                        <button onclick="linkClient('${escapeHtml(client.client_id)}')" class="btn btn-primary" style="flex:0;white-space:nowrap;">
+                            Link to My Account
+                        </button>
+                    `}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function linkClient(clientId) {
+    try {
+        const response = await fetch(`${API_BASE}/clients/${encodeURIComponent(clientId)}/link`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast('Client linked successfully!', 'success');
+            loadClients(); // Reload the clients list
+        } else {
+            showToast(`Failed to link client: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('Failed to link client:', error);
+        showToast('Failed to link client', 'error');
+    }
+}
+
+async function unlinkClient(clientId) {
+    if (!confirm('Are you sure you want to unlink this client? It will no longer receive downloads from your account.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/clients/${encodeURIComponent(clientId)}/unlink`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showToast('Client unlinked successfully', 'success');
+            loadClients(); // Reload the clients list
+        } else {
+            showToast(`Failed to unlink client: ${data.message}`, 'error');
+        }
+    } catch (error) {
+        console.error('Failed to unlink client:', error);
+        showToast('Failed to unlink client', 'error');
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // ─── System Health & Installation Assistant ───

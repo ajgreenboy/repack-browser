@@ -178,6 +178,7 @@
                 <button id="navDownloads" onclick="showView('downloads')" class="nav-btn">Downloads</button>
                 <span id="downloadBadge" class="download-badge hidden">0</span>
             </div>
+            <button id="navClients" onclick="showView('clients')" class="nav-btn">My Clients</button>
             <button id="navSystemHealth" onclick="showView('systemHealth')" class="nav-btn">System Health</button>
         </nav>
         <div class="topbar-spacer"></div>
@@ -371,6 +372,45 @@
                 </button>
             </div>
             <div id="downloadsList"><div class="empty-state"><p>No downloads yet</p><p>Click a game and hit "Get Links" to get started.</p></div></div>
+        </div>
+
+        <div id="clientsView" class="hidden">
+            <div class="downloads-header">
+                <div>
+                    <h2>My Clients</h2>
+                    <p>Link your Windows client to your account to receive downloads.</p>
+                </div>
+                <button onclick="loadClients()" class="btn btn-ghost" style="white-space:nowrap">
+                    🔄 Refresh
+                </button>
+            </div>
+
+            <!-- Linked Clients -->
+            <div style="margin-bottom:2rem;">
+                <h3 style="font-size:1.1rem;font-weight:600;margin-bottom:0.75rem;color:var(--text);">✅ Linked Clients</h3>
+                <div id="linkedClientsList">
+                    <div class="loading-state">
+                        <div style="text-align:center">
+                            <div class="spinner" style="width:24px;height:24px;border-width:2px;margin-bottom:0.5rem;"></div>
+                            <p style="color:var(--text-dim);font-size:0.85rem;">Loading clients...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Unlinked Clients -->
+            <div>
+                <h3 style="font-size:1.1rem;font-weight:600;margin-bottom:0.75rem;color:var(--text);">🔗 Available Clients</h3>
+                <p style="font-size:0.85rem;color:var(--text-dim);margin-bottom:0.75rem;">These clients are not linked to any account. Click "Link to My Account" to connect your client.</p>
+                <div id="unlinkedClientsList">
+                    <div class="loading-state">
+                        <div style="text-align:center">
+                            <div class="spinner" style="width:24px;height:24px;border-width:2px;margin-bottom:0.5rem;"></div>
+                            <p style="color:var(--text-dim);font-size:0.85rem;">Loading clients...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </main>
 

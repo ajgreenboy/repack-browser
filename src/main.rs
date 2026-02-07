@@ -286,6 +286,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/clients/:client_id/progress", post(update_client_progress))
         .route("/api/clients/:client_id/system-info", post(update_client_system_info))
         .route("/api/clients", get(get_all_clients))
+        .route("/api/clients/mine", get(get_my_clients))  // Get current user's linked clients
+        .route("/api/clients/:client_id/link", post(link_client_to_user))  // Link client to current user
+        .route("/api/clients/:client_id/unlink", post(unlink_client_from_user))  // Unlink client
         .route("/api/clients/status", get(get_user_client_status))  // Check if user has connected client
         // Health check
         .route("/api/health", get(health_check))
@@ -2002,6 +2005,116 @@ async fn get_user_client_status(
         } else {
             "Client registered but offline. Please start the Windows client on your PC."
         }
+    })))
+}
+
+/// Get current user's linked clients
+async fn get_my_clients(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Get current user from session
+    let user = match get_current_user(&state.db, &headers).await {
+        Ok(user) => user,
+        Err(e) => return Err((StatusCode::UNAUTHORIZED, e)),
+    };
+
+    // Get all clients
+    let all_clients = db::get_all_clients(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Separate into linked and unlinked
+    let mut linked_clients = Vec::new();
+    let mut unlinked_clients = Vec::new();
+
+    let now = chrono::Utc::now();
+
+    for client in all_clients {
+        // Check if online (seen in last 2 minutes)
+        let is_online = if let Ok(last_seen) = chrono::DateTime::parse_from_rfc3339(&client.last_seen) {
+            let elapsed = now.signed_duration_since(last_seen.with_timezone(&chrono::Utc));
+            elapsed.num_seconds() < 120
+        } else {
+            false
+        };
+
+        let client_info = serde_json::json!({
+            "client_id": client.client_id,
+            "client_name": client.client_name,
+            "os_version": client.os_version,
+            "last_seen": client.last_seen,
+            "is_online": is_online,
+            "user_id": client.user_id,
+        });
+
+        if client.user_id == Some(user.id) {
+            linked_clients.push(client_info);
+        } else if client.user_id.is_none() {
+            unlinked_clients.push(client_info);
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "linked": linked_clients,
+        "unlinked": unlinked_clients,
+    })))
+}
+
+/// Link a client to the current user
+async fn link_client_to_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(client_id): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Get current user from session
+    let user = match get_current_user(&state.db, &headers).await {
+        Ok(user) => user,
+        Err(e) => return Err((StatusCode::UNAUTHORIZED, e)),
+    };
+
+    // Link client to user
+    match state.client_download_manager.link_client_to_user(&client_id, user.id).await {
+        Ok(_) => Ok(Json(serde_json::json!({
+            "success": true,
+            "message": format!("Client linked to your account"),
+        }))),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+    }
+}
+
+/// Unlink a client from the current user
+async fn unlink_client_from_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(client_id): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Get current user from session
+    let user = match get_current_user(&state.db, &headers).await {
+        Ok(user) => user,
+        Err(e) => return Err((StatusCode::UNAUTHORIZED, e)),
+    };
+
+    // Verify this client belongs to the current user
+    let client = db::get_client(&state.db, &client_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Client not found".to_string()))?;
+
+    if client.user_id != Some(user.id) {
+        return Err((StatusCode::FORBIDDEN, "This client is not linked to your account".to_string()));
+    }
+
+    // Unlink by setting user_id to NULL
+    sqlx::query("UPDATE clients SET user_id = NULL WHERE client_id = ?")
+        .bind(&client_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": "Client unlinked from your account",
     })))
 }
 
