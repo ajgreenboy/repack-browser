@@ -232,6 +232,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/installation/logs/:game_id", get(get_installation_history))
         .route("/api/installation/stats", get(get_installation_stats))
         .route("/api/installation/analyze/:log_id", get(analyze_failed_installation))
+        // Client management
+        .route("/api/clients/register", post(register_client))
+        .route("/api/clients/:client_id/queue", get(get_client_queue))
+        .route("/api/clients/:client_id/progress", post(update_client_progress))
+        .route("/api/clients/:client_id/system-info", post(update_client_system_info))
+        .route("/api/clients", get(get_all_clients))
         // Health check
         .route("/api/health", get(health_check))
         // Static files
@@ -1472,6 +1478,143 @@ async fn analyze_failed_installation(
         "log": log,
         "recommendations": recommendations,
     })))
+}
+
+// ─── Client Management Handlers ───
+
+#[derive(Deserialize)]
+struct RegisterClientRequest {
+    client_id: String,
+    client_name: String,
+    os_version: String,
+}
+
+#[derive(Serialize)]
+struct RegisterClientResponse {
+    success: bool,
+    message: String,
+}
+
+async fn register_client(
+    State(state): State<AppState>,
+    Json(payload): Json<RegisterClientRequest>,
+) -> Result<Json<RegisterClientResponse>, (StatusCode, Json<RegisterClientResponse>)> {
+    match db::register_client(
+        &state.db,
+        &payload.client_id,
+        &payload.client_name,
+        &payload.os_version,
+    )
+    .await
+    {
+        Ok(_) => Ok(Json(RegisterClientResponse {
+            success: true,
+            message: format!("Client {} registered successfully", payload.client_name),
+        })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(RegisterClientResponse {
+                success: false,
+                message: format!("Failed to register client: {}", e),
+            }),
+        )),
+    }
+}
+
+#[derive(Serialize)]
+struct QueueItem {
+    game_id: i64,
+    game_title: String,
+    file_path: String,
+    expected_md5: Option<String>,
+}
+
+async fn get_client_queue(
+    State(_state): State<AppState>,
+    Path(_client_id): Path<String>,
+) -> Json<Vec<QueueItem>> {
+    // For now, return empty queue
+    // In the future, this could return games the client should download/extract
+    Json(Vec::new())
+}
+
+#[derive(Deserialize)]
+struct ProgressUpdate {
+    file_path: String,
+    total_bytes: i64,
+    extracted_bytes: i64,
+    progress_percent: f64,
+    speed_mbps: f64,
+    eta_seconds: i64,
+    status: String,
+}
+
+async fn update_client_progress(
+    State(state): State<AppState>,
+    Path(client_id): Path<String>,
+    Json(payload): Json<ProgressUpdate>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    db::upsert_client_progress(
+        &state.db,
+        &client_id,
+        None,
+        &payload.file_path,
+        payload.total_bytes,
+        payload.extracted_bytes,
+        payload.progress_percent,
+        payload.speed_mbps,
+        payload.eta_seconds,
+        &payload.status,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize)]
+struct SystemInfoUpdate {
+    ram_total_gb: f64,
+    ram_available_gb: f64,
+    disk_space_gb: f64,
+    cpu_cores: i64,
+    missing_dlls: Vec<String>,
+}
+
+async fn update_client_system_info(
+    State(state): State<AppState>,
+    Path(client_id): Path<String>,
+    Json(payload): Json<SystemInfoUpdate>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let missing_dlls = if payload.missing_dlls.is_empty() {
+        None
+    } else {
+        Some(payload.missing_dlls.join(", "))
+    };
+
+    db::update_client_system_info(
+        &state.db,
+        &client_id,
+        payload.ram_total_gb,
+        payload.ram_available_gb,
+        payload.disk_space_gb,
+        payload.cpu_cores,
+        missing_dlls,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(StatusCode::OK)
+}
+
+async fn get_all_clients(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<db::Client>>, (StatusCode, String)> {
+    let clients = db::get_all_clients(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(clients))
 }
 
 async fn health_check(

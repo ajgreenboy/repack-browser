@@ -254,6 +254,57 @@ pub async fn init_db(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
     .execute(&pool)
     .await?;
 
+    // Create clients table for tracking Windows client agents
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT UNIQUE NOT NULL,
+            client_name TEXT NOT NULL,
+            os_version TEXT,
+            ram_total_gb REAL,
+            ram_available_gb REAL,
+            disk_space_gb REAL,
+            cpu_cores INTEGER,
+            missing_dlls TEXT,
+            last_seen TEXT NOT NULL,
+            registered_at TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_clients_client_id ON clients(client_id)")
+        .execute(&pool)
+        .await?;
+
+    // Create client_progress table for tracking extraction progress
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS client_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT NOT NULL,
+            game_id INTEGER,
+            file_path TEXT NOT NULL,
+            total_bytes INTEGER NOT NULL DEFAULT 0,
+            extracted_bytes INTEGER NOT NULL DEFAULT 0,
+            progress_percent REAL NOT NULL DEFAULT 0,
+            speed_mbps REAL NOT NULL DEFAULT 0,
+            eta_seconds INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (client_id) REFERENCES clients(client_id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_client_progress_client_id ON client_progress(client_id)")
+        .execute(&pool)
+        .await?;
+
     Ok(pool)
 }
 
@@ -879,5 +930,179 @@ pub async fn get_game_requirements(pool: &SqlitePool, game_id: i64) -> Result<Op
     )
     .bind(game_id)
     .fetch_optional(pool)
+    .await
+}
+
+// ─── Client Management ───
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Client {
+    pub id: i64,
+    pub client_id: String,
+    pub client_name: String,
+    pub os_version: Option<String>,
+    pub ram_total_gb: Option<f64>,
+    pub ram_available_gb: Option<f64>,
+    pub disk_space_gb: Option<f64>,
+    pub cpu_cores: Option<i64>,
+    pub missing_dlls: Option<String>,
+    pub last_seen: String,
+    pub registered_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ClientProgress {
+    pub id: i64,
+    pub client_id: String,
+    pub game_id: Option<i64>,
+    pub file_path: String,
+    pub total_bytes: i64,
+    pub extracted_bytes: i64,
+    pub progress_percent: f64,
+    pub speed_mbps: f64,
+    pub eta_seconds: i64,
+    pub status: String,
+    pub updated_at: String,
+}
+
+/// Register or update a client
+pub async fn register_client(
+    pool: &SqlitePool,
+    client_id: &str,
+    client_name: &str,
+    os_version: &str,
+) -> Result<i64, sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let result = sqlx::query(
+        "INSERT INTO clients (client_id, client_name, os_version, last_seen, registered_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(client_id) DO UPDATE SET
+            client_name = excluded.client_name,
+            os_version = excluded.os_version,
+            last_seen = excluded.last_seen"
+    )
+    .bind(client_id)
+    .bind(client_name)
+    .bind(os_version)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+
+    Ok(result.last_insert_rowid())
+}
+
+/// Update client system info
+pub async fn update_client_system_info(
+    pool: &SqlitePool,
+    client_id: &str,
+    ram_total_gb: f64,
+    ram_available_gb: f64,
+    disk_space_gb: f64,
+    cpu_cores: i64,
+    missing_dlls: Option<String>,
+) -> Result<(), sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    sqlx::query(
+        "UPDATE clients SET
+            ram_total_gb = ?,
+            ram_available_gb = ?,
+            disk_space_gb = ?,
+            cpu_cores = ?,
+            missing_dlls = ?,
+            last_seen = ?
+         WHERE client_id = ?"
+    )
+    .bind(ram_total_gb)
+    .bind(ram_available_gb)
+    .bind(disk_space_gb)
+    .bind(cpu_cores)
+    .bind(missing_dlls)
+    .bind(&now)
+    .bind(client_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Get a client by client_id
+pub async fn get_client(pool: &SqlitePool, client_id: &str) -> Result<Option<Client>, sqlx::Error> {
+    sqlx::query_as::<_, Client>(
+        "SELECT * FROM clients WHERE client_id = ?"
+    )
+    .bind(client_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// Get all clients
+pub async fn get_all_clients(pool: &SqlitePool) -> Result<Vec<Client>, sqlx::Error> {
+    sqlx::query_as::<_, Client>(
+        "SELECT * FROM clients ORDER BY last_seen DESC"
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// Update or insert client progress
+pub async fn upsert_client_progress(
+    pool: &SqlitePool,
+    client_id: &str,
+    game_id: Option<i64>,
+    file_path: &str,
+    total_bytes: i64,
+    extracted_bytes: i64,
+    progress_percent: f64,
+    speed_mbps: f64,
+    eta_seconds: i64,
+    status: &str,
+) -> Result<(), sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Delete old progress for this client, then insert new
+    sqlx::query("DELETE FROM client_progress WHERE client_id = ?")
+        .bind(client_id)
+        .execute(pool)
+        .await?;
+
+    sqlx::query(
+        "INSERT INTO client_progress (client_id, game_id, file_path, total_bytes, extracted_bytes, progress_percent, speed_mbps, eta_seconds, status, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    .bind(client_id)
+    .bind(game_id)
+    .bind(file_path)
+    .bind(total_bytes)
+    .bind(extracted_bytes)
+    .bind(progress_percent)
+    .bind(speed_mbps)
+    .bind(eta_seconds)
+    .bind(status)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Get current progress for a client
+pub async fn get_client_progress(pool: &SqlitePool, client_id: &str) -> Result<Option<ClientProgress>, sqlx::Error> {
+    sqlx::query_as::<_, ClientProgress>(
+        "SELECT * FROM client_progress WHERE client_id = ? ORDER BY updated_at DESC LIMIT 1"
+    )
+    .bind(client_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// Get all active client progress
+pub async fn get_all_client_progress(pool: &SqlitePool) -> Result<Vec<ClientProgress>, sqlx::Error> {
+    sqlx::query_as::<_, ClientProgress>(
+        "SELECT * FROM client_progress ORDER BY updated_at DESC"
+    )
+    .fetch_all(pool)
     .await
 }
