@@ -254,13 +254,102 @@ pub async fn init_db(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
     .execute(&pool)
     .await?;
 
+    // Users table for authentication
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            is_admin BOOLEAN DEFAULT 0,
+            created_at TEXT NOT NULL,
+            last_login TEXT
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+        .execute(&pool)
+        .await?;
+
+    // Sessions table for login sessions
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_token TEXT UNIQUE NOT NULL,
+            user_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(session_token)")
+        .execute(&pool)
+        .await?;
+
+    // User-specific favorites
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS user_favorites (
+            user_id INTEGER NOT NULL,
+            game_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, game_id),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (game_id) REFERENCES games(id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    // User-specific downloads
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS user_downloads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            download_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (download_id) REFERENCES downloads(id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    // User settings
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS user_settings (
+            user_id INTEGER PRIMARY KEY,
+            theme TEXT DEFAULT 'dark',
+            notifications_enabled BOOLEAN DEFAULT 1,
+            auto_download BOOLEAN DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
     // Create clients table for tracking Windows client agents
+    // Add user_id to link clients to users
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS clients (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_id TEXT UNIQUE NOT NULL,
             client_name TEXT NOT NULL,
+            user_id INTEGER,
             os_version TEXT,
             ram_total_gb REAL,
             ram_available_gb REAL,
@@ -268,7 +357,8 @@ pub async fn init_db(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
             cpu_cores INTEGER,
             missing_dlls TEXT,
             last_seen TEXT NOT NULL,
-            registered_at TEXT NOT NULL
+            registered_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
         "#,
     )
@@ -304,6 +394,36 @@ pub async fn init_db(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_client_progress_client_id ON client_progress(client_id)")
         .execute(&pool)
         .await?;
+
+    // Migrations for existing databases
+    let _ = sqlx::query("ALTER TABLE clients ADD COLUMN user_id INTEGER")
+        .execute(&pool)
+        .await;
+
+    // Create default admin user if no users exist
+    let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+        .fetch_one(&pool)
+        .await?;
+
+    if user_count.0 == 0 {
+        // Create default admin user (username: admin, password: admin)
+        // User should change this immediately
+        use bcrypt::{hash, DEFAULT_COST};
+        let password_hash = hash("admin", DEFAULT_COST).unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        sqlx::query(
+            "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, 1, ?)"
+        )
+        .bind("admin")
+        .bind(&password_hash)
+        .bind(&now)
+        .execute(&pool)
+        .await?;
+
+        println!("Created default admin user (username: admin, password: admin)");
+        println!("⚠️  Please change the admin password immediately!");
+    }
 
     Ok(pool)
 }
@@ -1103,6 +1223,326 @@ pub async fn get_all_client_progress(pool: &SqlitePool) -> Result<Vec<ClientProg
     sqlx::query_as::<_, ClientProgress>(
         "SELECT * FROM client_progress ORDER BY updated_at DESC"
     )
+    .fetch_all(pool)
+    .await
+}
+
+// ─── User Authentication ───
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    #[serde(skip_serializing)]
+    pub password_hash: String,
+    pub is_admin: bool,
+    pub created_at: String,
+    pub last_login: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Session {
+    pub id: i64,
+    pub session_token: String,
+    pub user_id: i64,
+    pub created_at: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserInfo {
+    pub id: i64,
+    pub username: String,
+    pub is_admin: bool,
+    pub created_at: String,
+    pub last_login: Option<String>,
+}
+
+impl From<User> for UserInfo {
+    fn from(user: User) -> Self {
+        Self {
+            id: user.id,
+            username: user.username,
+            is_admin: user.is_admin,
+            created_at: user.created_at,
+            last_login: user.last_login,
+        }
+    }
+}
+
+/// Create a new user
+pub async fn create_user(
+    pool: &SqlitePool,
+    username: &str,
+    password: &str,
+    is_admin: bool,
+) -> Result<i64, sqlx::Error> {
+    use bcrypt::{hash, DEFAULT_COST};
+
+    let password_hash = hash(password, DEFAULT_COST)
+        .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let result = sqlx::query(
+        "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)"
+    )
+    .bind(username)
+    .bind(&password_hash)
+    .bind(is_admin)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+
+    // Create default settings for user
+    sqlx::query(
+        "INSERT INTO user_settings (user_id) VALUES (?)"
+    )
+    .bind(result.last_insert_rowid())
+    .execute(pool)
+    .await?;
+
+    Ok(result.last_insert_rowid())
+}
+
+/// Verify user credentials and return user if valid
+pub async fn verify_user(
+    pool: &SqlitePool,
+    username: &str,
+    password: &str,
+) -> Result<Option<User>, sqlx::Error> {
+    let user: Option<User> = sqlx::query_as(
+        "SELECT * FROM users WHERE username = ?"
+    )
+    .bind(username)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(user) = user {
+        use bcrypt::verify;
+        if verify(password, &user.password_hash).unwrap_or(false) {
+            // Update last login
+            let now = chrono::Utc::now().to_rfc3339();
+            let _ = sqlx::query("UPDATE users SET last_login = ? WHERE id = ?")
+                .bind(&now)
+                .bind(user.id)
+                .execute(pool)
+                .await;
+
+            return Ok(Some(user));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Create a new session for a user
+pub async fn create_session(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<String, sqlx::Error> {
+    use uuid::Uuid;
+
+    let session_token = Uuid::new_v4().to_string();
+    let now = chrono::Utc::now();
+    let expires_at = (now + chrono::Duration::days(30)).to_rfc3339();
+
+    sqlx::query(
+        "INSERT INTO sessions (session_token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)"
+    )
+    .bind(&session_token)
+    .bind(user_id)
+    .bind(&now.to_rfc3339())
+    .bind(&expires_at)
+    .execute(pool)
+    .await?;
+
+    Ok(session_token)
+}
+
+/// Get user by session token
+pub async fn get_user_by_session(
+    pool: &SqlitePool,
+    session_token: &str,
+) -> Result<Option<User>, sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let user: Option<User> = sqlx::query_as(
+        "SELECT u.* FROM users u
+         JOIN sessions s ON s.user_id = u.id
+         WHERE s.session_token = ? AND s.expires_at > ?"
+    )
+    .bind(session_token)
+    .bind(&now)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(user)
+}
+
+/// Delete a session (logout)
+pub async fn delete_session(
+    pool: &SqlitePool,
+    session_token: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM sessions WHERE session_token = ?")
+        .bind(session_token)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+/// Clean up expired sessions
+pub async fn cleanup_expired_sessions(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    sqlx::query("DELETE FROM sessions WHERE expires_at < ?")
+        .bind(&now)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+/// Get all users (admin only)
+pub async fn get_all_users(pool: &SqlitePool) -> Result<Vec<UserInfo>, sqlx::Error> {
+    let users: Vec<User> = sqlx::query_as(
+        "SELECT * FROM users ORDER BY created_at DESC"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(users.into_iter().map(UserInfo::from).collect())
+}
+
+/// Check if user is admin
+pub async fn is_admin(pool: &SqlitePool, user_id: i64) -> Result<bool, sqlx::Error> {
+    let (is_admin,): (bool,) = sqlx::query_as(
+        "SELECT is_admin FROM users WHERE id = ?"
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(is_admin)
+}
+
+// ─── User-Specific Favorites ───
+
+/// Add favorite for a user
+pub async fn add_user_favorite(
+    pool: &SqlitePool,
+    user_id: i64,
+    game_id: i64,
+) -> Result<(), sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    sqlx::query(
+        "INSERT OR IGNORE INTO user_favorites (user_id, game_id, created_at) VALUES (?, ?, ?)"
+    )
+    .bind(user_id)
+    .bind(game_id)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Remove favorite for a user
+pub async fn remove_user_favorite(
+    pool: &SqlitePool,
+    user_id: i64,
+    game_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM user_favorites WHERE user_id = ? AND game_id = ?")
+        .bind(user_id)
+        .bind(game_id)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+/// Get all favorites for a user
+pub async fn get_user_favorites(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<Vec<i64>, sqlx::Error> {
+    let favorites: Vec<(i64,)> = sqlx::query_as(
+        "SELECT game_id FROM user_favorites WHERE user_id = ? ORDER BY created_at DESC"
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(favorites.into_iter().map(|(id,)| id).collect())
+}
+
+/// Check if a game is favorited by user
+pub async fn is_favorite(
+    pool: &SqlitePool,
+    user_id: i64,
+    game_id: i64,
+) -> Result<bool, sqlx::Error> {
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM user_favorites WHERE user_id = ? AND game_id = ?"
+    )
+    .bind(user_id)
+    .bind(game_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(count.0 > 0)
+}
+
+// ─── User-Specific Downloads ───
+
+/// Link a download to a user
+pub async fn add_user_download(
+    pool: &SqlitePool,
+    user_id: i64,
+    download_id: i64,
+) -> Result<(), sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    sqlx::query(
+        "INSERT INTO user_downloads (user_id, download_id, created_at) VALUES (?, ?, ?)"
+    )
+    .bind(user_id)
+    .bind(download_id)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Get all download IDs for a user
+pub async fn get_user_download_ids(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<Vec<i64>, sqlx::Error> {
+    let downloads: Vec<(i64,)> = sqlx::query_as(
+        "SELECT download_id FROM user_downloads WHERE user_id = ? ORDER BY created_at DESC"
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(downloads.into_iter().map(|(id,)| id).collect())
+}
+
+/// Get clients for a specific user
+pub async fn get_user_clients(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<Vec<Client>, sqlx::Error> {
+    sqlx::query_as::<_, Client>(
+        "SELECT * FROM clients WHERE user_id = ? ORDER BY last_seen DESC"
+    )
+    .bind(user_id)
     .fetch_all(pool)
     .await
 }

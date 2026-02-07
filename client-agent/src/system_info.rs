@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use sysinfo::{System, SystemExt};
+use sysinfo::System;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemInfo {
