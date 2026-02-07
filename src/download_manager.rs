@@ -178,7 +178,7 @@ impl DownloadManager {
             r#"
             SELECT d.id, d.game_id, d.status, d.progress, d.download_speed, d.eta,
                    d.file_path, d.installer_path, d.error_message, d.created_at, d.completed_at,
-                   g.title as game_title, g.file_size as game_size, d.client_id
+                   g.title as game_title, g.file_size as game_size, d.client_id, d.user_id
             FROM downloads d
             JOIN games g ON d.game_id = g.id
             ORDER BY d.created_at DESC
