@@ -2,6 +2,7 @@ mod db;
 mod downloader;
 mod download_manager;
 mod extractor;
+mod installation_checker;
 mod md5_validator;
 mod rawg;
 mod realdebrid;
@@ -218,6 +219,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/settings", post(save_settings))
         // System information
         .route("/api/system-info", get(get_system_info))
+        .route("/api/pre-install-check/:game_id", get(check_pre_install))
         // Health check
         .route("/api/health", get(health_check))
         // Static files
@@ -1289,6 +1291,20 @@ async fn get_system_info(
         "issues": system_info.get_issues(),
         "recommendations": system_info.get_recommendations(),
     }))
+}
+
+/// Check if system is ready for game installation
+async fn check_pre_install(
+    State(state): State<AppState>,
+    Path(game_id): Path<i64>,
+) -> Result<Json<installation_checker::PreInstallCheckResult>, (StatusCode, String)> {
+    match installation_checker::check_pre_installation(&state.db, game_id).await {
+        Ok(result) => Ok(Json(result)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Pre-installation check failed: {}", e),
+        )),
+    }
 }
 
 async fn health_check(
