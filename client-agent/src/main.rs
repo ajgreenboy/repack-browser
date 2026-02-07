@@ -22,7 +22,7 @@ struct AppState {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize logger
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Info)
@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn register_with_server(state: &AppState) -> Result<(), Box<dyn std::error::Error>> {
+async fn register_with_server(state: &AppState) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = state.config.read().await;
 
     let sys_info = system_info::gather_system_info(
@@ -148,7 +148,7 @@ async fn start_extraction(
     state: &AppState,
     archive_path: PathBuf,
     queue_item: server_client::DownloadQueueItem,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = state.config.read().await;
     let output_dir = config.extraction.output_dir.join(&queue_item.game_title);
     let verify_md5 = config.extraction.verify_md5;
@@ -291,8 +291,19 @@ async fn watch_extraction_folder(state: AppState) {
                         expected_md5: None,
                     };
 
-                    if let Err(e) = start_extraction(&state, path, queue_item).await {
+                    if let Err(e) = start_extraction(&state, path.clone(), queue_item).await {
                         error!("Auto-extraction failed: {}", e);
+                    } else {
+                        // Move to processed folder to avoid re-extraction
+                        let processed_dir = watch_dir.join("processed");
+                        if std::fs::create_dir_all(&processed_dir).is_ok() {
+                            let new_path = processed_dir.join(path.file_name().unwrap());
+                            if let Err(e) = std::fs::rename(&path, &new_path) {
+                                error!("Failed to move processed archive: {}", e);
+                            } else {
+                                info!("Moved processed archive to: {:?}", new_path);
+                            }
+                        }
                     }
                 }
             }
