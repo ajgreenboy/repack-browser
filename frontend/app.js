@@ -1,4 +1,12 @@
 const API_BASE = '/api';
+
+// Override fetch to always include credentials (session cookie)
+const _originalFetch = window.fetch;
+window.fetch = function(url, options = {}) {
+    options.credentials = options.credentials || 'include';
+    return _originalFetch.call(this, url, options);
+};
+
 let currentPage = 1;
 let totalPages = 1;
 let isLoadingMore = false;
@@ -456,8 +464,9 @@ function showGameModal(gameId) {
     const origSize = game.original_size
         ? `<p style="margin-bottom:0.25rem;font-size:0.85rem"><strong>Original Size:</strong> ${escapeHtml(game.original_size)}</p>`
         : '';
+    const sourceName = game.source === 'steamrip' ? 'SteamRIP' : 'FitGirl Repacks';
     const sourceLink = game.source_url
-        ? `<p style="margin-bottom:0.25rem"><a href="${escapeHtml(game.source_url)}" target="_blank" style="color:var(--accent-bright);font-size:0.85rem;text-decoration:none">View on FitGirl Repacks →</a></p>`
+        ? `<p style="margin-bottom:0.25rem"><a href="${encodeURI(game.source_url)}" target="_blank" style="color:var(--accent-bright);font-size:0.85rem;text-decoration:none">View on ${escapeHtml(sourceName)} →</a></p>`
         : '';
 
     document.getElementById('confirmContent').innerHTML = `
@@ -1118,18 +1127,21 @@ async function validateMD5(id) {
             resultsHtml += '</div>';
         }
 
-        // Show modal with results
+        // Show modal with results using proper CSS classes
         const modal = document.createElement('div');
-        modal.className = 'modal';
+        modal.className = 'modal-overlay';
         modal.innerHTML = `
-            <div class="modal-content" style="max-width:600px">
+            <div class="modal-box" style="max-width:600px">
                 <h2>MD5 Validation Results</h2>
                 ${resultsHtml}
                 <div style="display:flex;gap:0.5rem;margin-top:1rem">
-                    <button onclick="this.closest('.modal').remove()" class="btn btn-primary" style="flex:1">Close</button>
+                    <button onclick="this.closest('.modal-overlay').remove()" class="btn btn-primary" style="flex:1">Close</button>
                 </div>
             </div>
         `;
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.remove();
+        });
         document.body.appendChild(modal);
 
         if (result.failed === 0) {
@@ -1706,12 +1718,6 @@ async function unlinkClient(clientId) {
     }
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
 // ─── System Health & Installation Assistant ───
 
 async function loadSystemHealth() {
@@ -1827,31 +1833,8 @@ async function loadInstallationStats() {
 
 async function loadInstallationLogs() {
     const container = document.getElementById('installLogsContent');
-    try {
-        const response = await fetch(`${API_BASE}/installation/stats`); // We'll show recent from all logs
-        const logs = []; // Placeholder - would need endpoint to get recent logs
-
-        if (logs.length === 0) {
-            container.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-muted);">No installation logs yet</div>';
-            return;
-        }
-
-        container.innerHTML = logs.map(log => `
-            <div style="background:var(--bg-surface);border-radius:8px;padding:1rem;margin-bottom:0.75rem;">
-                <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
-                    <div style="font-weight:600;">Game ID: ${log.game_id}</div>
-                    <div style="font-size:0.75rem;color:var(--text-muted);">${new Date(log.started_at).toLocaleString()}</div>
-                </div>
-                <div style="display:flex;gap:0.5rem;font-size:0.875rem;">
-                    <span style="color:${log.status === 'completed' ? 'var(--green)' : 'var(--red)'};">${log.status.toUpperCase()}</span>
-                    ${log.install_duration_minutes ? `<span>• ${log.install_duration_minutes}m</span>` : ''}
-                    ${log.ram_usage_peak ? `<span>• ${log.ram_usage_peak.toFixed(1)}GB RAM</span>` : ''}
-                </div>
-            </div>
-        `).join('');
-    } catch (error) {
-        container.innerHTML = '<div style="color:var(--red);text-align:center;padding:2rem;">Failed to load installation logs</div>';
-    }
+    // No dedicated endpoint for logs list — show a simple message
+    container.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-muted);">Installation logs are available per-game from the downloads view.</div>';
 }
 
 // Pre-Installation Check Modal
@@ -1907,7 +1890,6 @@ async function showPreInstallCheck(gameId) {
                 </div>
             ` : ''}
 
-            ${!result.can_proceed ? '<div style="text-align:center;margin-top:1rem;"><button onclick="showInstallAssistant()" class="btn btn-primary">Open Installation Assistant</button></div>' : ''}
         `;
     } catch (error) {
         content.innerHTML = '<div style="color:var(--red);text-align:center;padding:2rem;">Failed to run pre-installation check</div>';
@@ -1918,58 +1900,3 @@ function hidePreInstallModal() {
     document.getElementById('preInstallModal').classList.add('hidden');
 }
 
-// Installation Assistant Modal
-async function showInstallAssistant() {
-    hidePreInstallModal();
-    document.getElementById('assistantModal').classList.remove('hidden');
-    const content = document.getElementById('assistantActions');
-
-    try {
-        // Get system info first
-        const sysResponse = await fetch(`${API_BASE}/system-info`);
-        const sysData = await sysResponse.json();
-
-        // Get recommended actions
-        const actionsResponse = await fetch(`${API_BASE}/assistant/actions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                missing_dlls: sysData.missing_dlls || [],
-                missing_dependencies: sysData.missing_dependencies || [],
-                antivirus_active: sysData.antivirus_active,
-                install_path: 'C:\\Games' // Default path
-            })
-        });
-        const actions = await actionsResponse.json();
-
-        if (actions.length === 0) {
-            content.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--green);">✅ Your system is ready! No actions needed.</div>';
-            return;
-        }
-
-        content.innerHTML = actions.map(action => `
-            <div style="background:var(--bg-surface);border-radius:8px;padding:1rem;margin-bottom:0.75rem;">
-                <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.5rem;">
-                    <div>
-                        <div style="font-weight:600;margin-bottom:0.25rem;">${action.name}</div>
-                        <div style="font-size:0.875rem;color:var(--text-muted);">${action.description}</div>
-                    </div>
-                    ${action.required ? '<span style="background:var(--red);color:white;padding:0.25rem 0.5rem;border-radius:4px;font-size:0.7rem;font-weight:700;">REQUIRED</span>' : ''}
-                </div>
-                <button onclick="executeAssistantAction('${action.id}')" class="btn btn-primary btn-sm" style="margin-top:0.5rem;">Execute</button>
-            </div>
-        `).join('');
-    } catch (error) {
-        content.innerHTML = '<div style="color:var(--red);text-align:center;padding:2rem;">Failed to load assistant actions</div>';
-    }
-}
-
-function hideAssistantModal() {
-    document.getElementById('assistantModal').classList.add('hidden');
-}
-
-async function executeAssistantAction(actionId) {
-    // This would call the appropriate endpoint based on action ID
-    showToast(`Executing ${actionId}...`, 'info');
-    // Implementation would vary by action type
-}

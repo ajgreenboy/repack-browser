@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use regex::Regex;
 use reqwest::Client;
-use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
 use std::collections::HashSet;
 use tokio::sync::RwLock;
 
 use super::{GameScraper, LinkType, ScrapedGame, ScrapeProgress};
+use super::utils::{self, WpPost};
 
 pub struct SteamRipScraper {
     client: Client,
@@ -140,7 +140,7 @@ impl GameScraper for SteamRipScraper {
                 posts_without_link += 1;
             }
         }
-        update_metadata_counts(&progress, &all_games, posts_without_link).await;
+        utils::update_metadata_counts(&progress, &all_games, posts_without_link).await;
 
         // Phase 2: Fetch remaining pages
         let batch_size = 5;
@@ -192,7 +192,7 @@ impl GameScraper for SteamRipScraper {
                 }
             }
 
-            update_metadata_counts(&progress, &all_games, posts_without_link).await;
+            utils::update_metadata_counts(&progress, &all_games, posts_without_link).await;
             {
                 let mut p = progress.write().await;
                 let pct = 2.0 + (end_page as f64 / total_pages as f64) * 88.0;
@@ -237,77 +237,30 @@ impl GameScraper for SteamRipScraper {
     }
 }
 
-// ─── WordPress REST API response types ───
-
-#[derive(Debug, Deserialize)]
-struct WpPost {
-    id: i64,
-    date: Option<String>,
-    link: Option<String>,
-    title: WpRendered,
-    content: WpRendered,
-    #[serde(rename = "_embedded")]
-    embedded: Option<WpEmbedded>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpRendered {
-    rendered: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpEmbedded {
-    #[serde(rename = "wp:featuredmedia")]
-    featured_media: Option<Vec<WpMedia>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpMedia {
-    source_url: Option<String>,
-    media_details: Option<WpMediaDetails>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpMediaDetails {
-    sizes: Option<WpMediaSizes>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpMediaSizes {
-    medium: Option<WpMediaSize>,
-    thumbnail: Option<WpMediaSize>,
-    medium_large: Option<WpMediaSize>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpMediaSize {
-    source_url: Option<String>,
-}
-
 // ─── Post parsing ───
 
 impl SteamRipScraper {
     fn parse_wp_post(&self, post: &WpPost, supported_hosts: &HashSet<String>) -> Option<ScrapedGame> {
-        let title = html_to_text(&post.title.rendered);
+        let title = utils::html_to_text(&post.title.rendered);
         if title.is_empty() {
             return None;
         }
 
         let content_html = &post.content.rendered;
-        let content_text = html_to_text(content_html);
+        let content_text = utils::html_to_text(content_html);
 
         // Extract DDL link from HTML content (only from supported hosters)
         let ddl_link = self.extract_ddl_links(content_html, supported_hosts)?;
 
         // Extract file size - SteamRIP typically shows "Size: XX GB"
-        let file_size = extract_field(&content_text, r"(?i)(?:size|file size)\s*[:\s]\s*(.+?)(?:\n|$)")
+        let file_size = utils::extract_field(&content_text, r"(?i)(?:size|file size)\s*[:\s]\s*(.+?)(?:\n|$)")
             .unwrap_or_else(|| "N/A".to_string());
 
         // Extract genres if available
-        let genres = extract_field(&content_text, r"(?i)(?:genre|genres)\s*[:\s]\s*(.+?)(?:\n|$)")
+        let genres = utils::extract_field(&content_text, r"(?i)(?:genre|genres)\s*[:\s]\s*(.+?)(?:\n|$)")
             .map(|g| g.trim_end_matches(|c: char| c == '.' || c == ',').to_string());
 
-        // Get thumbnail URL from featured media
+        // Get thumbnail URL from featured media (strict_types=false for SteamRIP)
         let thumbnail_url = post.embedded.as_ref()
             .and_then(|e| e.featured_media.as_ref())
             .and_then(|media| media.first())
@@ -321,10 +274,10 @@ impl SteamRipScraper {
                     })
                     .or_else(|| m.source_url.clone())
             })
-            .or_else(|| extract_first_image(content_html));
+            .or_else(|| utils::extract_first_image(content_html, false));
 
-        // Extract screenshots
-        let screenshots = extract_all_images(content_html);
+        // Extract screenshots (less strict for SteamRIP)
+        let screenshots = utils::extract_all_images(content_html, false);
         let screenshots = if screenshots.is_empty() {
             None
         } else {
@@ -346,99 +299,4 @@ impl SteamRipScraper {
             post_date: post.date.clone(),
         })
     }
-}
-
-async fn update_metadata_counts(
-    progress: &Arc<RwLock<ScrapeProgress>>,
-    games: &[ScrapedGame],
-    posts_without_link: i64,
-) {
-    let with_thumbnail = games.iter().filter(|g| g.thumbnail_url.is_some()).count() as i64;
-    let with_genres = games.iter().filter(|g| g.genres.is_some()).count() as i64;
-
-    let mut p = progress.write().await;
-    p.with_thumbnail = with_thumbnail;
-    p.with_genres = with_genres;
-    p.magnets_found = games.len() as i64;
-    p.posts_without_magnet = posts_without_link;
-}
-
-fn extract_first_image(html: &str) -> Option<String> {
-    let re = Regex::new(r#"<img[^>]+src="([^"]+)"[^>]*>"#).ok()?;
-
-    for cap in re.captures_iter(html) {
-        if let Some(url) = cap.get(1) {
-            let src = url.as_str();
-
-            if src.contains("emoji")
-                || src.contains("smilies")
-                || src.contains("gravatar")
-                || src.contains("wp-includes")
-                || src.contains("pixel")
-                || src.ends_with(".gif")
-            {
-                continue;
-            }
-
-            if src.starts_with("http") {
-                return Some(src.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn extract_all_images(html: &str) -> Vec<String> {
-    let re = match Regex::new(r#"<img[^>]+src="([^"]+)"[^>]*>"#) {
-        Ok(r) => r,
-        Err(_) => return vec![],
-    };
-
-    let mut images = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-
-    for cap in re.captures_iter(html) {
-        if let Some(url) = cap.get(1) {
-            let src = url.as_str();
-
-            if src.contains("emoji") || src.contains("smilies") || src.ends_with(".gif") {
-                continue;
-            }
-
-            if src.starts_with("http") {
-                if seen.insert(src.to_string()) {
-                    images.push(src.to_string());
-                }
-            }
-        }
-    }
-    images
-}
-
-fn extract_field(text: &str, pattern: &str) -> Option<String> {
-    let re = Regex::new(pattern).ok()?;
-    re.captures(text)
-        .and_then(|cap| cap.get(1))
-        .map(|m| m.as_str().trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-fn html_to_text(html: &str) -> String {
-    let text = html
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#039;", "'")
-        .replace("<br>", "\n")
-        .replace("<br/>", "\n")
-        .replace("<br />", "\n")
-        .replace("</p>", "\n")
-        .replace("</li>", "\n")
-        .replace("</div>", "\n");
-
-    let tag_re = Regex::new(r"<[^>]+>").unwrap();
-    let stripped = tag_re.replace_all(&text, "");
-
-    stripped.trim().to_string()
 }

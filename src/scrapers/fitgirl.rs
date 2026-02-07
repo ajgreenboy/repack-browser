@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use regex::Regex;
 use reqwest::Client;
-use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
 use super::{GameScraper, LinkType, ScrapedGame, ScrapeProgress};
+use super::utils::{self, WpPost};
 
 pub struct FitGirlScraper {
     client: Client,
@@ -83,7 +83,7 @@ impl GameScraper for FitGirlScraper {
                 posts_without_magnet += 1;
             }
         }
-        update_metadata_counts(&progress, &all_games, posts_without_magnet).await;
+        utils::update_metadata_counts(&progress, &all_games, posts_without_magnet).await;
 
         // Phase 2: Fetch remaining pages
         let batch_size = 5;
@@ -136,7 +136,7 @@ impl GameScraper for FitGirlScraper {
             }
 
             // Update progress with metadata counts
-            update_metadata_counts(&progress, &all_games, posts_without_magnet).await;
+            utils::update_metadata_counts(&progress, &all_games, posts_without_magnet).await;
             {
                 let mut p = progress.write().await;
                 let pct = 2.0 + (end_page as f64 / total_pages as f64) * 88.0;
@@ -171,7 +171,7 @@ impl GameScraper for FitGirlScraper {
             .filter(|g| validate_magnet(&g.download_link))
             .collect();
 
-        update_metadata_counts(&progress, &valid_games, posts_without_magnet).await;
+        utils::update_metadata_counts(&progress, &valid_games, posts_without_magnet).await;
         {
             let mut p = progress.write().await;
             p.phase = "done".to_string();
@@ -203,100 +203,34 @@ impl GameScraper for FitGirlScraper {
     }
 }
 
-// ─── WordPress REST API response types ───
-
-#[derive(Debug, Deserialize)]
-struct WpPost {
-    id: i64,
-    date: Option<String>,
-    link: Option<String>,
-    title: WpRendered,
-    content: WpRendered,
-    #[serde(rename = "_embedded")]
-    embedded: Option<WpEmbedded>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpRendered {
-    rendered: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpEmbedded {
-    #[serde(rename = "wp:featuredmedia")]
-    featured_media: Option<Vec<WpMedia>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpMedia {
-    source_url: Option<String>,
-    media_details: Option<WpMediaDetails>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpMediaDetails {
-    sizes: Option<WpMediaSizes>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpMediaSizes {
-    medium: Option<WpMediaSize>,
-    thumbnail: Option<WpMediaSize>,
-    medium_large: Option<WpMediaSize>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WpMediaSize {
-    source_url: Option<String>,
-}
-
 // ─── Post parsing ───
 
-async fn update_metadata_counts(
-    progress: &Arc<RwLock<ScrapeProgress>>,
-    games: &[ScrapedGame],
-    posts_without_magnet: i64,
-) {
-    let with_thumbnail = games.iter().filter(|g| g.thumbnail_url.is_some()).count() as i64;
-    let with_genres = games.iter().filter(|g| g.genres.is_some()).count() as i64;
-    let with_company = games.iter().filter(|g| g.company.is_some()).count() as i64;
-    let with_original_size = games.iter().filter(|g| g.original_size.is_some()).count() as i64;
-
-    let mut p = progress.write().await;
-    p.with_thumbnail = with_thumbnail;
-    p.with_genres = with_genres;
-    p.with_company = with_company;
-    p.with_original_size = with_original_size;
-    p.magnets_found = games.len() as i64;
-    p.posts_without_magnet = posts_without_magnet;
-}
-
 fn parse_wp_post(post: &WpPost) -> Option<ScrapedGame> {
-    let title = html_to_text(&post.title.rendered);
+    let title = utils::html_to_text(&post.title.rendered);
     if title.is_empty() {
         return None;
     }
 
     let content_html = &post.content.rendered;
-    let content_text = html_to_text(content_html);
+    let content_text = utils::html_to_text(content_html);
 
     // Extract magnet link from the HTML content
     let magnet = extract_magnet(content_html)?;
 
     // Extract metadata from the text content
-    let file_size = extract_field(&content_text, r"(?i)(?:repack\s+size)\s*[:\s]\s*(.+?)(?:\n|$)")
+    let file_size = utils::extract_field(&content_text, r"(?i)(?:repack\s+size)\s*[:\s]\s*(.+?)(?:\n|$)")
         .unwrap_or_else(|| "N/A".to_string());
 
-    let original_size = extract_field(&content_text, r"(?i)(?:original\s+size)\s*[:\s]\s*(.+?)(?:\n|$)");
+    let original_size = utils::extract_field(&content_text, r"(?i)(?:original\s+size)\s*[:\s]\s*(.+?)(?:\n|$)");
 
-    let genres = extract_field(&content_text, r"(?i)(?:genres?\s*/?\s*tags?)\s*[:\s]\s*(.+?)(?:\n|$)")
+    let genres = utils::extract_field(&content_text, r"(?i)(?:genres?\s*/?\s*tags?)\s*[:\s]\s*(.+?)(?:\n|$)")
         .map(|g| g.trim_end_matches(|c: char| c == '.' || c == ',').to_string());
 
-    let company = extract_field(&content_text, r"(?i)(?:compan(?:y|ies))\s*[:\s]\s*(.+?)(?:\n|$)")
+    let company = utils::extract_field(&content_text, r"(?i)(?:compan(?:y|ies))\s*[:\s]\s*(.+?)(?:\n|$)")
         .map(|c| c.trim_end_matches(|c: char| c == '.' || c == ',').to_string());
 
-    // Get thumbnail URL
-    let content_img = extract_first_image(content_html);
+    // Get thumbnail URL (strict_types=true for FitGirl to avoid junk images)
+    let content_img = utils::extract_first_image(content_html, true);
 
     let featured_img = post.embedded.as_ref()
         .and_then(|e| e.featured_media.as_ref())
@@ -315,7 +249,7 @@ fn parse_wp_post(post: &WpPost) -> Option<ScrapedGame> {
     let thumbnail_url = content_img.or(featured_img);
 
     // Extract all screenshot URLs from content
-    let screenshots = extract_all_images(content_html);
+    let screenshots = utils::extract_all_images(content_html, true);
     let screenshots = if screenshots.is_empty() {
         None
     } else {
@@ -346,113 +280,6 @@ fn extract_magnet(html: &str) -> Option<String> {
     re.captures(html)
         .and_then(|cap| cap.get(1))
         .map(|m| m.as_str().to_string())
-}
-
-fn extract_first_image(html: &str) -> Option<String> {
-    let re = Regex::new(r#"<img[^>]+src="([^"]+)"[^>]*>"#).ok()?;
-
-    for cap in re.captures_iter(html) {
-        if let Some(url) = cap.get(1) {
-            let src = url.as_str();
-
-            if src.contains("emoji")
-                || src.contains("smilies")
-                || src.contains("gravatar")
-                || src.contains("wp-includes")
-                || src.contains("feeds.feedburner")
-                || src.contains("pixel")
-                || src.contains("badge")
-                || src.contains("button")
-                || src.contains("banner")
-                || src.contains("icon")
-                || src.ends_with(".gif")
-                || src.contains("1x1")
-                || src.contains("counter")
-            {
-                continue;
-            }
-
-            if src.starts_with("http") && (src.contains(".jpg") || src.contains(".jpeg") || src.contains(".png") || src.contains(".webp") || src.contains("wp-content/uploads")) {
-                return Some(src.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn extract_all_images(html: &str) -> Vec<String> {
-    let re = match Regex::new(r#"<img[^>]+src="([^"]+)"[^>]*>"#) {
-        Ok(r) => r,
-        Err(_) => return vec![],
-    };
-
-    let mut images = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-
-    for cap in re.captures_iter(html) {
-        if let Some(url) = cap.get(1) {
-            let src = url.as_str();
-
-            if src.contains("emoji")
-                || src.contains("smilies")
-                || src.contains("gravatar")
-                || src.contains("wp-includes")
-                || src.contains("feeds.feedburner")
-                || src.contains("pixel")
-                || src.contains("badge")
-                || src.contains("button")
-                || src.contains("banner")
-                || src.contains("icon")
-                || src.ends_with(".gif")
-                || src.contains("1x1")
-                || src.contains("counter")
-            {
-                continue;
-            }
-
-            if src.starts_with("http")
-                && (src.contains(".jpg") || src.contains(".jpeg") || src.contains(".png") || src.contains(".webp") || src.contains("wp-content/uploads"))
-            {
-                if seen.insert(src.to_string()) {
-                    images.push(src.to_string());
-                }
-            }
-        }
-    }
-    images
-}
-
-fn extract_field(text: &str, pattern: &str) -> Option<String> {
-    let re = Regex::new(pattern).ok()?;
-    re.captures(text)
-        .and_then(|cap| cap.get(1))
-        .map(|m| m.as_str().trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-fn html_to_text(html: &str) -> String {
-    let text = html
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#039;", "'")
-        .replace("&#8211;", "–")
-        .replace("&#8212;", "—")
-        .replace("&#8217;", "'")
-        .replace("&#8220;", "\u{201c}")
-        .replace("&#8221;", "\u{201d}")
-        .replace("<br>", "\n")
-        .replace("<br/>", "\n")
-        .replace("<br />", "\n")
-        .replace("</p>", "\n")
-        .replace("</li>", "\n")
-        .replace("</div>", "\n");
-
-    let tag_re = Regex::new(r"<[^>]+>").unwrap();
-    let stripped = tag_re.replace_all(&text, "");
-
-    stripped.trim().to_string()
 }
 
 fn validate_magnet(link: &str) -> bool {

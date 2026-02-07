@@ -19,7 +19,11 @@ pub struct Downloader {
 impl Downloader {
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(30))
+                // No overall timeout - downloads can be very large
+                .build()
+                .expect("Failed to build HTTP client"),
             progress: Arc::new(RwLock::new(None)),
         }
     }

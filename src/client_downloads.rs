@@ -224,6 +224,65 @@ impl ClientDownloadManager {
         Ok(())
     }
 
+    /// Get all downloads for a specific user (for the downloads view)
+    pub async fn get_user_downloads(
+        &self,
+        user_id: i64,
+    ) -> Result<Vec<crate::download_manager::DownloadInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let rows: Vec<db::DownloadRow> = sqlx::query_as(
+            r#"
+            SELECT d.id, d.game_id, d.status, d.progress, d.download_speed, d.eta,
+                   d.file_path, d.installer_path, d.error_message, d.created_at, d.completed_at,
+                   g.title as game_title, g.file_size as game_size, d.client_id, d.user_id
+            FROM downloads d
+            JOIN games g ON d.game_id = g.id
+            WHERE d.user_id = ?
+            ORDER BY d.created_at DESC
+            "#
+        )
+        .bind(user_id)
+        .fetch_all(&self.db)
+        .await?;
+
+        let mut downloads = Vec::new();
+        for row in rows {
+            let files: Vec<db::DownloadFileRow> = sqlx::query_as(
+                "SELECT id, filename, file_size, file_path, is_extracted FROM download_files WHERE download_id = ?"
+            )
+            .bind(row.id)
+            .fetch_all(&self.db)
+            .await
+            .unwrap_or_default();
+
+            downloads.push(crate::download_manager::DownloadInfo {
+                id: row.id,
+                game_id: row.game_id,
+                game_title: row.game_title,
+                game_size: row.game_size,
+                status: row.status,
+                progress: row.progress,
+                download_speed: row.download_speed,
+                eta: row.eta,
+                file_path: row.file_path,
+                installer_path: row.installer_path,
+                error_message: row.error_message,
+                extract_progress: None,
+                created_at: row.created_at,
+                completed_at: row.completed_at,
+                files: files.into_iter().map(|f| crate::download_manager::DownloadFileInfo {
+                    id: f.id,
+                    filename: f.filename,
+                    file_size: f.file_size,
+                    file_path: f.file_path,
+                    is_extracted: f.is_extracted,
+                }).collect(),
+                has_md5: false,
+            });
+        }
+
+        Ok(downloads)
+    }
+
     /// Link a client to a user
     pub async fn link_client_to_user(
         &self,

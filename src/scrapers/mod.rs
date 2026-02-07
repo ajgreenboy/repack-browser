@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 pub mod fitgirl;
 pub mod steamrip;
 pub mod registry;
+pub mod utils;
 
 /// Type of download link
 #[derive(Debug, Clone, PartialEq)]

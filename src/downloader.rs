@@ -177,23 +177,4 @@ impl Downloader {
         cancelled.remove(&download_id);
     }
 
-    /// Check available disk space (returns bytes available)
-    pub async fn check_disk_space(&self) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-        // Simple approach: try to get available space
-        // On most systems this works via the filesystem
-        fs::create_dir_all(&self.download_dir).await?;
-
-        // Use a platform-agnostic approach
-        #[cfg(target_os = "windows")]
-        {
-            // On Windows, use the GetDiskFreeSpaceExW API via std
-            // For simplicity, we'll return a large number and let the download fail if space runs out
-            Ok(u64::MAX)
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            Ok(u64::MAX)
-        }
-    }
 }

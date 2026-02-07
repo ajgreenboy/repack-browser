@@ -9,7 +9,6 @@ mod installation_monitor;
 mod md5_validator;
 mod rawg;
 mod realdebrid;
-mod scraper;  // Keep old scraper for backward compatibility during transition
 mod scrapers;
 mod system_info;
 
@@ -296,6 +295,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest_service("/", ServeDir::new(frontend_dir))
         .layer(CorsLayer::permissive())
         .with_state(state);
+
+    // Spawn periodic session cleanup task (every hour)
+    let cleanup_db = db.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+        loop {
+            interval.tick().await;
+            if let Err(e) = db::cleanup_expired_sessions(&cleanup_db).await {
+                eprintln!("Session cleanup error: {}", e);
+            }
+        }
+    });
 
     let addr = "0.0.0.0:3000";
     println!("🚀 Server running on http://{}", addr);
@@ -624,29 +635,23 @@ async fn get_random_game(
     Ok(Json(serde_json::json!({ "game": game })))
 }
 
-// ─── Favorites ───
+// ─── Favorites (per-user) ───
 
 async fn get_favorites(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let fav_ids_str = db::get_setting(&state.db, "favorites")
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .unwrap_or_default();
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    let ids: Vec<i64> = if fav_ids_str.is_empty() {
-        vec![]
-    } else {
-        fav_ids_str.split(',')
-            .filter_map(|s| s.trim().parse::<i64>().ok())
-            .collect()
-    };
+    let ids = db::get_user_favorites(&state.db, user.id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if ids.is_empty() {
         return Ok(Json(serde_json::json!({ "favorites": [], "ids": [] })));
     }
 
-    // Fetch game details for each favorite
     let mut games = Vec::new();
     for id in &ids {
         if let Ok(game) = db::get_game_by_id(&state.db, *id).await {
@@ -662,30 +667,19 @@ async fn get_favorites(
 
 async fn add_favorite(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
-    let current = db::get_setting(&state.db, "favorites")
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false, message: e, downloads: None, download_id: None,
+        })))?;
+
+    db::add_user_favorite(&state.db, user.id, id).await.map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
             success: false, message: e.to_string(), downloads: None, download_id: None,
-        })))?
-        .unwrap_or_default();
-
-    let mut ids: Vec<i64> = if current.is_empty() {
-        vec![]
-    } else {
-        current.split(',').filter_map(|s| s.trim().parse::<i64>().ok()).collect()
-    };
-
-    if !ids.contains(&id) {
-        ids.push(id);
-        let new_val = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
-        db::set_setting(&state.db, "favorites", &new_val).await.map_err(|e| {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
-                success: false, message: e.to_string(), downloads: None, download_id: None,
-            }))
-        })?;
-    }
+        }))
+    })?;
 
     Ok(Json(ApiResponse {
         success: true,
@@ -697,22 +691,15 @@ async fn add_favorite(
 
 async fn remove_favorite(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
-    let current = db::get_setting(&state.db, "favorites")
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
-            success: false, message: e.to_string(), downloads: None, download_id: None,
-        })))?
-        .unwrap_or_default();
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false, message: e, downloads: None, download_id: None,
+        })))?;
 
-    let ids: Vec<i64> = current.split(',')
-        .filter_map(|s| s.trim().parse::<i64>().ok())
-        .filter(|i| *i != id)
-        .collect();
-
-    let new_val = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
-    db::set_setting(&state.db, "favorites", &new_val).await.map_err(|e| {
+    db::remove_user_favorite(&state.db, user.id, id).await.map_err(|e| {
         (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
             success: false, message: e.to_string(), downloads: None, download_id: None,
         }))
@@ -1218,21 +1205,43 @@ async fn add_to_realdebrid(
 
 async fn get_downloads(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<DownloadsResponse>, StatusCode> {
-    let downloads = state.download_manager.get_downloads()
-        .await
-        .map_err(|e| {
-            eprintln!("Error getting downloads: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    // Require authentication
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    // Admin sees all downloads, regular users see only their own
+    let downloads = if user.is_admin {
+        state.download_manager.get_downloads()
+            .await
+            .map_err(|e| {
+                eprintln!("Error getting downloads: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+    } else {
+        state.client_download_manager.get_user_downloads(user.id)
+            .await
+            .map_err(|e| {
+                eprintln!("Error getting user downloads: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+    };
 
     Ok(Json(DownloadsResponse { downloads }))
 }
 
 async fn queue_download(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<QueueDownloadRequest>,
 ) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    // Require authentication
+    let _user = get_current_user(&state.db, &headers).await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false, message: e, downloads: None, download_id: None,
+        })))?;
+
     match state.download_manager.queue_download(payload.game_id).await {
         Ok(download_id) => {
             Ok(Json(ApiResponse {
@@ -1268,8 +1277,15 @@ async fn get_download_status(
 
 async fn cancel_download(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    // Require authentication
+    let _user = get_current_user(&state.db, &headers).await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false, message: e, downloads: None, download_id: None,
+        })))?;
+
     state.download_manager.cancel_download(id)
         .await
         .map(|_| Json(ApiResponse {
@@ -1288,8 +1304,15 @@ async fn cancel_download(
 
 async fn retry_download(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    // Require authentication
+    let _user = get_current_user(&state.db, &headers).await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false, message: e, downloads: None, download_id: None,
+        })))?;
+
     state.download_manager.retry_download(id)
         .await
         .map(|_| Json(ApiResponse {
@@ -1308,8 +1331,15 @@ async fn retry_download(
 
 async fn remove_download(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    // Require authentication
+    let _user = get_current_user(&state.db, &headers).await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false, message: e, downloads: None, download_id: None,
+        })))?;
+
     state.download_manager.remove_download(id)
         .await
         .map(|_| Json(ApiResponse {

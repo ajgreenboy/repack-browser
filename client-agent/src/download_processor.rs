@@ -108,37 +108,55 @@ async fn process_single_download(
         let file_path = output_dir.join(&sanitized_filename);
         info!("Downloading to: {:?}", file_path);
 
-        // Download file
-        match downloader.download_file(url, &file_path).await {
-            Ok(_) => {
-                info!("Downloaded: {}", filename);
-                downloaded_files.push(file_path);
+        // Download file with retry and backoff
+        let max_retries = 3;
+        let mut last_error = String::new();
+        let mut success = false;
 
-                // Update progress
-                let progress = ((idx + 1) as f64 / download.direct_urls.len() as f64) * 100.0;
-                report_progress(
-                    server_client,
-                    download_id,
-                    "downloading",
-                    progress,
-                    None,
-                    None,
-                    None,
-                ).await?;
+        for attempt in 0..=max_retries {
+            if attempt > 0 {
+                let delay_secs = 5u64 * (1 << (attempt - 1)); // 5, 10, 20 seconds
+                warn!("Retry {}/{} for {} (waiting {}s)", attempt, max_retries, filename, delay_secs);
+                tokio::time::sleep(Duration::from_secs(delay_secs)).await;
             }
-            Err(e) => {
-                error!("Failed to download {}: {}", filename, e);
-                report_progress(
-                    server_client,
-                    download_id,
-                    "failed",
-                    0.0,
-                    None,
-                    None,
-                    Some(format!("Download failed: {}", e)),
-                ).await?;
-                return Err(e);
+
+            match downloader.download_file(url, &file_path).await {
+                Ok(_) => {
+                    info!("Downloaded: {}", filename);
+                    downloaded_files.push(file_path.clone());
+
+                    // Update progress
+                    let progress = ((idx + 1) as f64 / download.direct_urls.len() as f64) * 100.0;
+                    report_progress(
+                        server_client,
+                        download_id,
+                        "downloading",
+                        progress,
+                        None,
+                        None,
+                        None,
+                    ).await?;
+                    success = true;
+                    break;
+                }
+                Err(e) => {
+                    last_error = format!("{}", e);
+                    error!("Download attempt {} failed for {}: {}", attempt + 1, filename, e);
+                }
             }
+        }
+
+        if !success {
+            report_progress(
+                server_client,
+                download_id,
+                "failed",
+                0.0,
+                None,
+                None,
+                Some(format!("Download failed after {} retries: {}", max_retries, last_error)),
+            ).await?;
+            return Err(last_error.into());
         }
     }
 
@@ -279,9 +297,17 @@ fn find_installer(dir: &Path) -> Result<PathBuf, String> {
 async fn run_silent_install(installer_path: &Path) -> Result<(), String> {
     info!("Running silent installation: {:?}", installer_path);
 
-    // FitGirl repack silent install flags
+    // Determine install directory (same parent as installer)
+    let install_dir = installer_path
+        .parent()
+        .unwrap_or(Path::new("C:\\Games"))
+        .to_string_lossy()
+        .to_string();
+
+    // FitGirl repack silent install flags (InnoSetup)
     let output = tokio::process::Command::new(installer_path)
         .arg("/VERYSILENT")
+        .arg(format!("/DIR={}", install_dir))
         .arg("/LANG=english")
         .arg("/NOCANCEL")
         .arg("/NORESTART")

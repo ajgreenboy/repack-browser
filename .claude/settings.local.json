@@ -32,7 +32,12 @@
       "Bash(rustup target add:*)",
       "Bash(gh release create:*)",
       "Bash(__NEW_LINE_15020f7159016402__ **Architecture:**)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(powershell -Command \"cd Z:\\\\fitgirl-scraper\\\\client-agent; cargo build --release --target x86_64-pc-windows-gnu\")",
+      "Bash(powershell -Command \"cd Z:\\\\fitgirl-scraper\\\\client-agent; cargo clean; cargo build --release --target x86_64-pc-windows-gnu\")",
+      "Bash(powershell -Command \"cd Z:\\\\fitgirl-scraper\\\\client-agent; $env:CARGO_TARGET_DIR=''C:\\\\temp\\\\cargo-target''; cargo build --release --target x86_64-pc-windows-gnu\")",
+      "Bash(dir:*)",
+      "Bash(ls -la \"Z:\\\\fitgirl-scraper\\\\client-agent\\\\src\"\" | grep -E \"main.*.rs \")"
     ]
   }
 }

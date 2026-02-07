@@ -50,7 +50,11 @@ impl ServerClient {
     pub fn new(base_url: String) -> Self {
         Self {
             base_url,
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .build()
+                .expect("Failed to build HTTP client"),
         }
     }
 
