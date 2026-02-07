@@ -1,205 +1,426 @@
 # Repack Browser
 
-A comprehensive self-hosted solution for browsing, downloading, and managing game repacks from multiple sources. Features Real-Debrid integration, system health monitoring, and a Windows client agent for distributed extraction.
+A **self-hosted game repack browser** for households. Browse 7500+ games from multiple sources (FitGirl, SteamRIP), download directly to your PC, and auto-install with one click.
 
-> **⚠️ IMPORTANT: Real-Debrid Terms of Service**
+> **⚠️ For Personal/Household Use Only**
 >
-> This application uses Real-Debrid for downloading. According to [Real-Debrid's Terms of Service](https://real-debrid.com/terms), each account is for **personal use only** and should only be used from **one household/IP address**.
+> This application is designed for **home networks**. Each household member runs the Windows client on their own PC. Downloads happen locally, not on the server.
 >
-> **✅ ALLOWED:** Multiple devices/users in the same household sharing one Real-Debrid account via this app
->
-> **❌ NOT ALLOWED:** Sharing this installation publicly or with people outside your household
->
-> **Your responsibility:** Comply with Real-Debrid's TOS. Account suspension/termination is possible if violated.
+> **Real-Debrid:** Each user needs their own Real-Debrid account. Sharing one account violates [Real-Debrid's TOS](https://real-debrid.com/terms).
 
-## Self-Hosting
+---
 
-This project is designed for **personal/household use**. You can:
-- Run it on your home server for yourself and household members
-- Use the multi-user authentication to separate each person's downloads and favorites
-- Connect multiple Windows clients from PCs in your home
+## 🎯 How It Works
 
-Do **NOT** expose this publicly or share access with people outside your household.
+1. **Server** (Docker) - Hosts the game catalog and web interface
+2. **Windows Client** - Runs on each PC, handles downloads/installs locally
+3. **Web Browser** - Browse games from any device on your network
 
-## Screenshots
+**Workflow:**
+```
+Browse website → Click Download → Local client downloads to YOUR PC → Auto-extracts → Auto-installs
+```
 
-### Library View
-![Library View](Screenshots/home.png)
+---
 
-### Game Details
-![Game Details](Screenshots/gamedlpage.png)
+## ✨ Features
 
-### Download Links
-![Download Links](Screenshots/links.png)
+### 🎮 Game Catalog
+- **7500+ games** from FitGirl Repacks and SteamRIP
+- **Advanced search** with genre filtering and sorting
+- **Screenshot galleries** for each game
+- **Favorites system** to bookmark games
+- **Random picker** for discovering new games
 
-## Features
+### 👥 Multi-User Support
+- **Separate accounts** for each household member
+- **Personal favorites** and download history per user
+- **Session-based authentication** with secure cookies
+- **Admin controls** for managing the system
 
-### Core Features
-- 🎮 **Multi-source scraping** - ~7500+ games from FitGirl Repacks and SteamRIP
-- 🔍 **Advanced search** - Search, genre filtering, sorting (date, title, size)
-- ⭐ **Favorites system** - Mark and filter your favorite games
-- 🎲 **Random picker** - Discover new games randomly
-- 🖼️ **Screenshot galleries** - View game screenshots before downloading
-- 🔗 **Real-Debrid integration** - Convert magnet links and DDL to direct downloads
-- 🎨 **RAWG API integration** - Auto-fill missing game metadata and images
+### 📥 Smart Downloads
+- **Downloads to YOUR PC** - Not the server!
+- **Real-Debrid integration** - Converts magnets to fast direct downloads
+- **Progress tracking** - Real-time speed, ETA, and progress bars
+- **Auto-extraction** - Handles ZIP and 7Z archives
+- **Silent installation** - FitGirl repacks install automatically with no prompts
+- **Desktop notifications** - Get notified at every stage
 
-### Multi-User Authentication
-- 👥 **User accounts** - Separate login for each household member
-- 🔐 **Session-based auth** - Secure authentication with HTTP-only cookies
-- 🛡️ **Admin roles** - Admin users can manage the system
-- 📂 **Personal data** - Each user has their own favorites and download history
-- 🔑 **Default admin** - `admin` / `admin` (change immediately on first login)
+### 🔧 Windows Client Features
+- **Local HTTP server** - Browser communicates with your local client
+- **Real-Debrid** - Each user uses their own RD account
+- **Download manager** - Handles multiple files with resume support
+- **Auto-extractor** - Extracts archives to your games folder
+- **Silent installer** - Runs FitGirl setups with `/VERYSILENT /LANG=english`
+- **Notifications** - Windows popups for download/extract/install status
 
-### Download Management
-- 📥 **Queue system** - Manage multiple downloads
-- 📊 **Real-time progress** - Live download speed, ETA, and progress bars
-- 📦 **Auto-extraction** - Automatically extract .zip and .7z archives
-- ✅ **MD5 validation** - Verify file integrity after extraction
-- 🔄 **Retry failed downloads** - Automatic retry with error recovery
-- 🗑️ **Smart cleanup** - Optional archive deletion after extraction
+---
 
-### System Health & Installation
-- 💻 **System monitoring** - Track RAM, disk space, CPU cores, missing DLLs
-- ⚠️ **Pre-install checks** - Validate system requirements before installation
-- 🛠️ **Installation assistant** - One-click DLL installation and AV exclusions
-- 📝 **Installation logs** - Track success/failure with error analysis
-- 📈 **Community ratings** - Share installation difficulty and issues
-- 🔍 **Failure analysis** - AI-powered recommendations for failed installations
+## 🚀 Quick Start
 
-### Windows Client Agent
-- 🖥️ **Distributed extraction** - Offload extraction to Windows clients
-- 🌐 **Multi-user support** - Track multiple clients on your network
-- 📡 **Real-time reporting** - Live extraction progress from each client
-- 🤖 **Auto-watch folders** - Automatically extract files dropped in watch folder
-- 🆔 **Client tracking** - Unique UUID per client with system info
+### Step 1: Server Setup (Docker)
 
-## Quick Start
+**Requirements:** Docker, Docker Compose
 
-### Docker (Recommended)
-
-1. **Clone the repository:**
 ```bash
-git clone https://github.com/ajgreenboy/repack-browser.git repack-browser
+# Clone repository
+git clone https://github.com/ajgreenboy/repack-browser.git
 cd repack-browser
+
+# Start server
+docker compose up -d
 ```
 
-2. **Copy example config:**
+**Access:** `http://your-server-ip:3030`
+
+**First login:**
+- Username: `admin`
+- Password: `admin`
+- ⚠️ **Change immediately!**
+
+**Initial setup:**
+1. Log in and go to Settings
+2. (Optional) Add RAWG API key for game metadata
+3. Click "Scrape" to populate the database (~5 minutes)
+
+---
+
+### Step 2: Windows Client Setup
+
+#### Download Client
+Get the latest Windows client from [Releases](https://github.com/ajgreenboy/repack-browser/releases)
+
+Or build from source:
 ```bash
-cp docker-compose.example.yml docker-compose.yml
-# Edit docker-compose.yml with your settings
+cd client-agent
+cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-3. **Start the server:**
+#### Configure Client
+
+1. **Run** `repack-client.exe` once to generate config
+2. **Edit** `%APPDATA%\RepackClient\config.toml`:
+
+```toml
+[server]
+url = "http://your-server-ip:3030"
+enabled = true
+
+[realdebrid]
+api_key = "YOUR_REAL_DEBRID_API_KEY"  # Get from https://real-debrid.com/apitoken
+enabled = true
+
+[extraction]
+output_dir = "C:\\Games"
+delete_after_extract = false
+```
+
+3. **Restart** the client
+4. **Keep it running** - Minimize to system tray
+
+#### Get Real-Debrid API Key
+1. Go to https://real-debrid.com/apitoken
+2. Copy your API key
+3. Paste into `config.toml`
+
+---
+
+## 📖 Usage Guide
+
+### Downloading Games
+
+1. **Browse** the website on your PC (where client is running)
+2. **Click** a game to view details
+3. **Click** "Download" button
+4. **Watch** notifications appear:
+   - "Processing Download..." (converting magnet via RD)
+   - "Downloading..." (file downloading to your PC)
+   - "Download Complete! Extracting..."
+   - "Extraction Complete! Installing..."
+   - "Installation Complete!"
+
+**That's it!** The game is now installed on your PC.
+
+### If Download Fails
+
+**Error: "Could not connect to Repack Client"**
+- Make sure the Windows client is running on your PC
+- Client must be on the same PC as your browser
+
+**Error: "Real-Debrid is not configured"**
+- Add your RD API key to `config.toml`
+- Set `enabled = true`
+- Restart the client
+
+---
+
+## 🏗️ Architecture
+
+### Server (Docker Container)
+**Responsibilities:**
+- Host game catalog (SQLite database)
+- Serve web interface
+- Handle user authentication
+- Track download progress (reported by clients)
+
+**Does NOT:**
+- Download files
+- Extract archives
+- Install games
+
+### Windows Client (Per PC)
+**Responsibilities:**
+- Run HTTP server on `localhost:9999` for browser commands
+- Download files to local disk via Real-Debrid
+- Extract archives locally
+- Install games silently
+- Report progress to server
+
+**Each client:**
+- Uses its own Real-Debrid account
+- Downloads to its own PC
+- Has its own output directory
+
+---
+
+## 🛠️ Configuration
+
+### Server Environment Variables
+
 ```bash
-docker compose up -d --build
+# Database
+DATABASE_PATH=sqlite:/app/data/games.db?mode=rwc
+
+# Optional: RAWG API for game metadata
+RAWG_API_KEY=your_key_here
+
+# Port (default: 3000)
+PORT=3000
 ```
 
-4. **Access the web UI:**
-Open `http://localhost:3030` in your browser.
+### Client Configuration
 
-5. **First login:**
-   - You'll be redirected to the login page
-   - Use the default admin account: **username:** `admin` **password:** `admin`
-   - ⚠️ **IMPORTANT:** Change the admin password immediately after first login!
-   - Create additional user accounts for household members via the Register page
+Full `config.toml` reference:
 
-6. **Initial setup:**
-   - Click **Settings** and add your API keys (optional but recommended)
-     - `RD_API_KEY` - Your Real-Debrid API key ([get it here](https://real-debrid.com/apitoken))
-     - `RAWG_API_KEY` - RAWG API key for game metadata ([get it here](https://rawg.io/apidocs))
-   - Click **Scrape** to populate the database (~5 minutes, ~7500 games)
+```toml
+[client]
+id = "auto-generated-uuid"
+name = "Your-PC-Name"
 
-### Building from Source
+[server]
+url = "http://homelab:3030"
+enabled = true
+poll_interval_secs = 30
 
-Requires Rust 1.85+ and SQLite.
+[realdebrid]
+api_key = "YOUR_KEY_HERE"  # Required!
+enabled = true
 
-```bash
-cargo build --release
-./target/release/repack-browser
+[extraction]
+output_dir = "C:\\Games"
+watch_dir = "C:\\Users\\YourName\\Downloads"
+delete_after_extract = false
+verify_md5 = true
+
+[monitoring]
+report_interval_secs = 2
+track_ram_usage = true
 ```
 
-Access at `http://localhost:3000`.
+---
 
-## Windows Client Agent
+## 🔐 Security
 
-For distributed extraction and multi-user setups, deploy the Windows client agent on each PC.
+### For Home Networks
+- ✅ Run behind your router/firewall
+- ✅ Don't expose port 3030 to internet
+- ✅ Use VPN/Tailscale for remote access
+- ✅ Change default admin password
 
-### Quick Setup
-
-1. **Download** `client-agent/repack-client.exe` from this repository
-2. **Run** the executable - it creates a config file automatically
-3. **Configure** `%APPDATA%\RepackClient\config.toml`:
-   ```toml
-   [server]
-   url = "http://your-server-ip:3030"
-   enabled = true
-   
-   [extraction]
-   output_dir = "C:\Games"
-   watch_dir = "C:\Users\YourName\Downloads"
-   ```
-4. **Restart** the client
-
-See [client-agent/README.md](client-agent/README.md) for full documentation.
-
-## Security
-
-### ⚠️ Change Default Admin Password
-
-The application creates a default admin account on first run:
-- **Username:** `admin`
-- **Password:** `admin`
-
-**You MUST change this password immediately:**
-1. Log in with the default credentials
-2. Create a new admin account with your own credentials
-3. (Future update will include password change feature)
-
-### Secret Management
-
-The repository uses proper secret management:
-- ✅ `.env` file is gitignored (never committed)
-- ✅ `.env.example` provided as template (no real secrets)
-- ✅ `docker-compose.override.yml` gitignored (for local config)
-- ✅ API keys should be set via environment variables or Settings UI
-
-**Never commit:**
-- Real-Debrid API keys
-- RAWG API keys
-- Database files
-- Download directories
-- Personal configurations
-
-### Network Security
-
-**For household use:**
-- Run behind your home router/firewall
-- Don't expose port 3030 to the internet
-- Use VPN/Tailscale if accessing remotely from outside your home
-
-**Authentication:**
-- Session cookies are HTTP-only and secure
+### Multi-User
+- Each user has separate account
+- Passwords are bcrypt hashed
+- Session cookies are HTTP-only
 - 30-day session expiry
-- Bcrypt password hashing
 
-## Configuration
+### Real-Debrid
+- Each user should have their own RD account
+- Don't share accounts (violates RD TOS)
+- API keys stored locally in client config
 
-All configuration can be done through the web UI under **Settings**, or via environment variables.
+---
 
-See [.env.example](.env.example) for all available options.
+## 📁 File Structure
 
-## Tech Stack
+```
+repack-browser/
+├── src/                    # Server source (Rust)
+├── frontend/               # Web UI (HTML/JS/CSS)
+├── client-agent/           # Windows client source (Rust)
+│   └── src/
+├── releases/               # Pre-built Windows client
+│   └── repack-client-windows-x64.exe
+├── data/                   # Database (gitignored)
+├── docker-compose.yml      # Docker setup
+└── Dockerfile
+```
 
-- **Backend:** Rust (Axum framework, SQLite via sqlx)
-- **Frontend:** Vanilla JavaScript, custom CSS
-- **Scraping:** WordPress REST API, HTML parsing
-- **APIs:** Real-Debrid, RAWG
-- **Client Agent:** Rust (Windows-specific)
+---
 
-## License
+## 🐛 Troubleshooting
 
-MIT
+### Server Issues
 
-## Disclaimer
+**Container won't start:**
+```bash
+docker compose logs fitgirl-browser
+```
 
-This tool is for educational purposes. Please support game developers by purchasing games legally.
+**Database errors:**
+```bash
+# Reset database
+rm -rf data/
+docker compose restart
+# Re-scrape games
+```
+
+### Client Issues
+
+**"Could not connect to Repack Client"**
+- Client must be running on same PC as browser
+- Check if `localhost:9999` is accessible
+- Firewall might be blocking port 9999
+
+**Downloads fail:**
+- Verify Real-Debrid API key is correct
+- Check RD account is active
+- Ensure enough disk space
+
+**Extraction fails:**
+- Check write permissions on output directory
+- Verify archive isn't corrupted
+- Check disk space
+
+**Installation doesn't start:**
+- Client looks for `setup.exe` in extracted folder
+- Some repacks use different installer names
+- Check client logs for details
+
+---
+
+## 🏠 For Roommates/Household
+
+### Setup for Each Person
+
+1. **Install client** on your PC
+2. **Configure** with your own Real-Debrid account
+3. **Create account** on the website
+4. **Keep client running** while browsing
+
+### What's Shared
+- Game catalog (everyone sees same games)
+- Server resources (bandwidth, storage)
+
+### What's Private
+- Your downloads (only you see them)
+- Your favorites
+- Your Real-Debrid account
+
+---
+
+## 🔄 Updating
+
+### Update Server
+```bash
+cd repack-browser
+git pull
+docker compose down
+docker compose build --no-cache
+docker compose up -d
+```
+
+### Update Client
+1. Download latest from [Releases](https://github.com/ajgreenboy/repack-browser/releases)
+2. Replace old `repack-client.exe`
+3. Restart client
+
+---
+
+## 💾 Backup
+
+**Important data:**
+- `data/games.db` - Game catalog and user data
+- `config.toml` - Client configuration
+
+**Backup script:**
+```bash
+# Server
+cp data/games.db data/games.db.backup
+
+# Client
+copy %APPDATA%\RepackClient\config.toml config.toml.backup
+```
+
+---
+
+## 🤝 Contributing
+
+This project is for personal/household use. If you want to contribute:
+
+1. Fork the repository
+2. Create a feature branch
+3. Test thoroughly
+4. Submit a pull request
+
+---
+
+## ⚖️ Legal
+
+### Disclaimer
+This tool is for **educational purposes**. Please support game developers by **purchasing games legally**.
+
+This application does not:
+- Host any copyrighted content
+- Distribute game files
+- Provide pirated material
+
+It simply provides a browser interface for publicly available information and connects to your existing Real-Debrid account.
+
+### Credits
+- Game data from [FitGirl Repacks](https://fitgirl-repacks.site) and [SteamRIP](https://steamrip.com)
+- Metadata from [RAWG.io](https://rawg.io)
+- Downloads via [Real-Debrid](https://real-debrid.com)
+
+### License
+MIT License - See LICENSE file
+
+---
+
+## 🐙 GitHub
+
+**Repository:** https://github.com/ajgreenboy/repack-browser
+**Issues:** https://github.com/ajgreenboy/repack-browser/issues
+**Releases:** https://github.com/ajgreenboy/repack-browser/releases
+
+---
+
+## 📝 Version
+
+**Current Version:** 2.0.0
+**Release Date:** February 2026
+**Architecture:** Client-side downloads (v2.0 refactor)
+
+### Recent Changes
+- ✅ Refactored to client-download architecture
+- ✅ Each user downloads to their own PC
+- ✅ Real-Debrid integration per client
+- ✅ Silent FitGirl installations
+- ✅ Desktop notifications
+- ✅ Multi-user authentication
+
+### Known Issues
+See [ARCHITECTURE_ISSUES.md](ARCHITECTURE_ISSUES.md) for technical details about ongoing refactoring work.
+
+---
+
+**Made with ❤️ for home lab enthusiasts**
