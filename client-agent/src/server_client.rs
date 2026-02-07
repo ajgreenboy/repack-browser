@@ -21,11 +21,14 @@ struct RegisterResponse {
     message: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct DownloadQueueItem {
+    pub download_id: i64,
     pub game_id: i64,
     pub game_title: String,
     pub file_path: String,
+    pub installer_path: Option<String>,
+    pub status: String,
     pub expected_md5: Option<String>,
 }
 
@@ -42,7 +45,7 @@ impl ServerClient {
         client_id: &str,
         client_name: &str,
         os_version: &str,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/api/clients/register", self.base_url);
 
         let request = RegisterRequest {
@@ -69,7 +72,7 @@ impl ServerClient {
     pub async fn get_download_queue(
         &self,
         client_id: &str,
-    ) -> Result<Vec<DownloadQueueItem>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<DownloadQueueItem>, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/api/clients/{}/queue", self.base_url, client_id);
 
         let response = self.client.get(&url).send().await?;
@@ -86,7 +89,7 @@ impl ServerClient {
         &self,
         client_id: &str,
         progress: &ExtractionProgress,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/api/clients/{}/progress", self.base_url, client_id);
 
         self.client
@@ -101,7 +104,7 @@ impl ServerClient {
     pub async fn report_system_info(
         &self,
         system_info: &SystemInfo,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url = format!(
             "{}/api/clients/{}/system-info",
             self.base_url, system_info.client_id

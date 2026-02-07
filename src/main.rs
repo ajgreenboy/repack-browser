@@ -1794,19 +1794,41 @@ async fn register_client(
 
 #[derive(Serialize)]
 struct QueueItem {
+    download_id: i64,
     game_id: i64,
     game_title: String,
     file_path: String,
+    installer_path: Option<String>,
+    status: String,
     expected_md5: Option<String>,
 }
 
 async fn get_client_queue(
-    State(_state): State<AppState>,
-    Path(_client_id): Path<String>,
+    State(state): State<AppState>,
+    Path(client_id): Path<String>,
 ) -> Json<Vec<QueueItem>> {
-    // For now, return empty queue
-    // In the future, this could return games the client should download/extract
-    Json(Vec::new())
+    // Get downloads assigned to this client
+    match state.download_manager.get_client_queue(&client_id).await {
+        Ok(downloads) => {
+            let items: Vec<QueueItem> = downloads
+                .into_iter()
+                .map(|d| QueueItem {
+                    download_id: d.id,
+                    game_id: d.game_id,
+                    game_title: d.game_title.clone(),
+                    file_path: d.file_path.clone().unwrap_or_default(),
+                    installer_path: d.installer_path.clone(),
+                    status: d.status.clone(),
+                    expected_md5: None, // TODO: Extract MD5 from game data if available
+                })
+                .collect();
+            Json(items)
+        }
+        Err(e) => {
+            eprintln!("Error getting client queue: {}", e);
+            Json(Vec::new())
+        }
+    }
 }
 
 #[derive(Deserialize)]

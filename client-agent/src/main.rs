@@ -16,6 +16,11 @@ use tokio::sync::RwLock;
 use tokio::time;
 
 #[cfg(windows)]
+use std::ffi::OsStr;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+
+#[cfg(windows)]
 use winreg::enums::*;
 #[cfg(windows)]
 use winreg::RegKey;
@@ -239,6 +244,185 @@ fn remove_from_startup() {}
 fn is_in_startup() -> bool { false }
 
 // Background tasks
+/// Show a Windows notification (using message box for now)
+#[cfg(windows)]
+fn show_notification(title: &str, message: &str) {
+    use winapi::um::winuser::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
+
+    let title_wide: Vec<u16> = OsStr::new(title)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let message_wide: Vec<u16> = OsStr::new(message)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            message_wide.as_ptr(),
+            title_wide.as_ptr(),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn show_notification(title: &str, message: &str) {
+    println!("[NOTIFICATION] {}: {}", title, message);
+}
+
+/// Extract a ZIP file
+async fn extract_zip(file_path: &std::path::Path, output_dir: &std::path::Path) -> Result<(), String> {
+
+    let file = std::fs::File::open(file_path)
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| format!("Failed to read ZIP: {}", e))?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)
+            .map_err(|e| format!("Failed to read file {}: {}", i, e))?;
+
+        let outpath = match file.enclosed_name() {
+            Some(path) => output_dir.join(path),
+            None => continue,
+        };
+
+        if file.name().ends_with('/') {
+            std::fs::create_dir_all(&outpath)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        } else {
+            if let Some(p) = outpath.parent() {
+                if !p.exists() {
+                    std::fs::create_dir_all(p)
+                        .map_err(|e| format!("Failed to create parent directory: {}", e))?;
+                }
+            }
+            let mut outfile = std::fs::File::create(&outpath)
+                .map_err(|e| format!("Failed to create output file: {}", e))?;
+            std::io::copy(&mut file, &mut outfile)
+                .map_err(|e| format!("Failed to extract file: {}", e))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Extract a 7Z file
+async fn extract_7z(file_path: &std::path::Path, output_dir: &std::path::Path) -> Result<(), String> {
+    sevenz_rust::decompress_file(file_path, output_dir)
+        .map_err(|e| format!("Failed to extract 7z: {}", e))
+}
+
+/// Poll the server for new downloads in the queue
+async fn poll_server_queue(state: Arc<AppState>) {
+    let mut interval = time::interval(Duration::from_secs(60)); // Poll every 60 seconds
+
+    loop {
+        interval.tick().await;
+
+        // Check if server is enabled
+        let config = state.config.read().await;
+        if !config.server.enabled {
+            continue;
+        }
+        let client_id = config.client.id.clone();
+        let output_dir = config.extraction.output_dir.clone();
+        drop(config);
+
+        // Get queue from server
+        match state.server_client.get_download_queue(&client_id).await {
+            Ok(queue) => {
+                if !queue.is_empty() {
+                    info!("Found {} items in download queue", queue.len());
+
+                    for item in queue {
+                        info!("Processing: {} (status: {})", item.game_title, item.status);
+
+                        // Update status
+                        {
+                            let mut status = state.status.write().await;
+                            *status = format!("Processing download: {}", item.game_title);
+                        }
+
+                        // If status is 'completed', the file is ready for extraction
+                        if item.status == "completed" && !item.file_path.is_empty() {
+                            let file_path = std::path::Path::new(&item.file_path);
+
+                            if file_path.exists() {
+                                info!("Extracting: {}", item.game_title);
+
+                                // Update status
+                                {
+                                    let mut status = state.status.write().await;
+                                    *status = format!("Extracting: {}", item.game_title);
+                                }
+
+                                // Extract the archive
+                                let extract_result = if file_path.extension()
+                                    .and_then(|e| e.to_str())
+                                    .map(|e| e.to_lowercase() == "zip")
+                                    .unwrap_or(false)
+                                {
+                                    extract_zip(file_path, &output_dir).await
+                                } else if file_path.extension()
+                                    .and_then(|e| e.to_str())
+                                    .map(|e| e.to_lowercase() == "7z")
+                                    .unwrap_or(false)
+                                {
+                                    extract_7z(file_path, &output_dir).await
+                                } else {
+                                    Err(format!("Unsupported archive format: {:?}", file_path))
+                                };
+
+                                match extract_result {
+                                    Ok(_) => {
+                                        info!("Extraction completed: {}", item.game_title);
+                                        let mut status = state.status.write().await;
+                                        *status = format!("✅ Extracted: {}", item.game_title);
+
+                                        // Show notification
+                                        let title_clone = item.game_title.clone();
+                                        tokio::task::spawn_blocking(move || {
+                                            show_notification(
+                                                "Extraction Complete",
+                                                &format!("{} has been extracted and is ready for installation.", title_clone)
+                                            );
+                                        });
+
+                                        // TODO: Report extraction completion to server
+                                    }
+                                    Err(e) => {
+                                        error!("Extraction failed: {}", e);
+                                        let mut status = state.status.write().await;
+                                        *status = format!("❌ Extraction failed: {}", item.game_title);
+
+                                        // Show error notification
+                                        let title_clone = item.game_title.clone();
+                                        tokio::task::spawn_blocking(move || {
+                                            show_notification(
+                                                "Extraction Failed",
+                                                &format!("Failed to extract {}. Check logs for details.", title_clone)
+                                            );
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to get download queue: {}", e);
+            }
+        }
+    }
+}
+
 async fn monitor_downloads(state: Arc<AppState>) {
     let mut interval = time::interval(Duration::from_secs(10));
 
@@ -314,8 +498,24 @@ async fn start_installation(state: Arc<AppState>, installer_path: PathBuf, game_
         *status = format!("Installing {}", game_title);
     }
 
-    // Run the installer
+    // Determine installation directory
+    let config = state.config.read().await;
+    let install_dir = config.extraction.output_dir.join(&game_title);
+    drop(config);
+
+    // Run the installer with silent flags
+    // FitGirl repacks use Inno Setup which supports these flags:
+    // /VERYSILENT - Completely silent install
+    // /LANG=english - Force English language
+    // /DIR="path" - Install directory
+    // /NOCANCEL - Don't allow cancel
+    // /NORESTART - Don't restart PC
     let result = tokio::process::Command::new(&installer_path)
+        .arg("/VERYSILENT")
+        .arg("/LANG=english")
+        .arg(format!("/DIR=\"{}\"", install_dir.display()))
+        .arg("/NOCANCEL")
+        .arg("/NORESTART")
         .spawn();
 
     match result {
@@ -329,10 +529,28 @@ async fn start_installation(state: Arc<AppState>, installer_path: PathBuf, game_
                         info!("Installation completed: {}", game_title);
                         let mut status = state.status.write().await;
                         *status = format!("✅ Installed {}", game_title);
+
+                        // Show success notification
+                        let title_clone = game_title.clone();
+                        tokio::task::spawn_blocking(move || {
+                            show_notification(
+                                "Installation Complete",
+                                &format!("{} has been installed successfully!", title_clone)
+                            );
+                        });
                     } else {
                         error!("Installation failed with code: {:?}", exit_status.code());
                         let mut status = state.status.write().await;
                         *status = format!("❌ Installation failed: {}", game_title);
+
+                        // Show error notification
+                        let title_clone = game_title.clone();
+                        tokio::task::spawn_blocking(move || {
+                            show_notification(
+                                "Installation Failed",
+                                &format!("{} installation failed. Check logs for details.", title_clone)
+                            );
+                        });
                     }
                 }
                 Err(e) => {
@@ -417,11 +635,19 @@ fn main() -> eframe::Result<()> {
         }
     });
 
-    // Start background monitor
+    // Start background monitor for local installers
     runtime.spawn({
         let state = state.clone();
         async move {
             monitor_downloads(state).await;
+        }
+    });
+
+    // Start server queue polling
+    runtime.spawn({
+        let state = state.clone();
+        async move {
+            poll_server_queue(state).await;
         }
     });
 

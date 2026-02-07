@@ -178,7 +178,7 @@ impl DownloadManager {
             r#"
             SELECT d.id, d.game_id, d.status, d.progress, d.download_speed, d.eta,
                    d.file_path, d.installer_path, d.error_message, d.created_at, d.completed_at,
-                   g.title as game_title, g.file_size as game_size
+                   g.title as game_title, g.file_size as game_size, d.client_id
             FROM downloads d
             JOIN games g ON d.game_id = g.id
             ORDER BY d.created_at DESC
@@ -251,6 +251,80 @@ impl DownloadManager {
                 progress,
                 download_speed: speed,
                 eta,
+                file_path: row.file_path,
+                installer_path: row.installer_path,
+                error_message: row.error_message,
+                extract_progress,
+                created_at: row.created_at,
+                completed_at: row.completed_at,
+                files: files.into_iter().map(|f| DownloadFileInfo {
+                    id: f.id,
+                    filename: f.filename,
+                    file_size: f.file_size,
+                    file_path: f.file_path,
+                    is_extracted: f.is_extracted,
+                }).collect(),
+                has_md5,
+            });
+        }
+
+        Ok(downloads)
+    }
+
+    /// Get downloads assigned to a specific client that are ready for extraction
+    /// Returns downloads with status 'completed' (downloaded but not extracted yet)
+    pub async fn get_client_queue(&self, client_id: &str) -> Result<Vec<DownloadInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let rows: Vec<db::DownloadRow> = sqlx::query_as(
+            r#"
+            SELECT d.id, d.game_id, d.status, d.progress, d.download_speed, d.eta,
+                   d.file_path, d.installer_path, d.error_message, d.created_at, d.completed_at,
+                   g.title as game_title, g.file_size as game_size, d.client_id
+            FROM downloads d
+            JOIN games g ON d.game_id = g.id
+            WHERE d.client_id = ? AND d.status IN ('completed', 'extracting')
+            ORDER BY d.created_at ASC
+            "#
+        )
+        .bind(client_id)
+        .fetch_all(&self.db)
+        .await?;
+
+        let mut downloads = Vec::new();
+
+        for row in rows {
+            // Get download files
+            let files: Vec<db::DownloadFileRow> = sqlx::query_as(
+                "SELECT id, filename, file_size, file_path, is_extracted FROM download_files WHERE download_id = ?"
+            )
+            .bind(row.id)
+            .fetch_all(&self.db)
+            .await
+            .unwrap_or_default();
+
+            // Get extraction progress if extracting
+            let extract_progress = if row.status == "extracting" {
+                self.extractor.get_progress(row.id).await
+            } else {
+                None
+            };
+
+            // Check if MD5 file exists
+            let has_md5 = if let Some(ref path) = row.file_path {
+                let dir = std::path::Path::new(path);
+                crate::md5_validator::find_md5_file(dir).await.is_some()
+            } else {
+                false
+            };
+
+            downloads.push(DownloadInfo {
+                id: row.id,
+                game_id: row.game_id,
+                game_title: row.game_title,
+                game_size: row.game_size,
+                status: row.status,
+                progress: row.progress,
+                download_speed: row.download_speed.clone(),
+                eta: row.eta.clone(),
                 file_path: row.file_path,
                 installer_path: row.installer_path,
                 error_message: row.error_message,

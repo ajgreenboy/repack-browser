@@ -18,6 +18,7 @@ pub struct DownloadRow {
     pub completed_at: Option<String>,
     pub game_title: String,
     pub game_size: String,
+    pub client_id: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -223,6 +224,11 @@ pub async fn init_db(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
 
     // Migration: add installer_path column if it doesn't exist (for existing DBs)
     let _ = sqlx::query("ALTER TABLE downloads ADD COLUMN installer_path TEXT")
+        .execute(&pool)
+        .await;
+
+    // Migration: add client_id column for assigning downloads to specific clients
+    let _ = sqlx::query("ALTER TABLE downloads ADD COLUMN client_id TEXT")
         .execute(&pool)
         .await;
 
