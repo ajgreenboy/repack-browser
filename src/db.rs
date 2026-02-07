@@ -577,7 +577,7 @@ pub async fn get_all_settings(pool: &SqlitePool) -> Result<Vec<(String, String)>
 
 // ─── New Feature Tables ───
 
-#[derive(Debug, Clone, Serialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct SystemCheck {
     pub id: i64,
     pub check_date: String,
@@ -590,7 +590,7 @@ pub struct SystemCheck {
     pub overall_status: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct InstallationLog {
     pub id: i64,
     pub game_id: Option<i64>,
@@ -603,7 +603,7 @@ pub struct InstallationLog {
     pub install_duration_minutes: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct CommunityRating {
     pub id: i64,
     pub game_id: i64,
@@ -613,7 +613,7 @@ pub struct CommunityRating {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct GameRequirement {
     pub game_id: i64,
     pub min_ram_gb: Option<i64>,
