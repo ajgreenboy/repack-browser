@@ -1,6 +1,6 @@
-# FitGirl Browser
+# FitGirl Scraper
 
-A self-hosted web app for browsing, searching, and managing FitGirl Repacks. Scrapes the FitGirl site for game metadata, images, and magnet links, with optional Real-Debrid integration for direct download links.
+A comprehensive self-hosted solution for browsing, downloading, and managing game repacks. Scrapes multiple sources (FitGirl Repacks, SteamRIP) with Real-Debrid integration, system health monitoring, and a Windows client agent for distributed extraction.
 
 ## Screenshots
 
@@ -15,71 +15,117 @@ A self-hosted web app for browsing, searching, and managing FitGirl Repacks. Scr
 
 ## Features
 
-- Scrapes ~7500 games with metadata (genres, developer, screenshots, file sizes)
-- Search, genre filtering, sorting (date, title, size)
-- Favorites system
-- Random game picker
-- Screenshot gallery per game
-- Real-Debrid integration for unrestricted download links
-- RAWG API integration for gap-filling missing images/metadata
-- Settings UI for API key management
-- SQLite database, persists across restarts
+### Core Features
+- 🎮 **Multi-source scraping** - ~7500+ games from FitGirl Repacks and SteamRIP
+- 🔍 **Advanced search** - Search, genre filtering, sorting (date, title, size)
+- ⭐ **Favorites system** - Mark and filter your favorite games
+- 🎲 **Random picker** - Discover new games randomly
+- 🖼️ **Screenshot galleries** - View game screenshots before downloading
+- 🔗 **Real-Debrid integration** - Convert magnet links and DDL to direct downloads
+- 🎨 **RAWG API integration** - Auto-fill missing game metadata and images
 
-## Quick Start (Docker)
+### Download Management
+- 📥 **Queue system** - Manage multiple downloads
+- 📊 **Real-time progress** - Live download speed, ETA, and progress bars
+- 📦 **Auto-extraction** - Automatically extract .zip and .7z archives
+- ✅ **MD5 validation** - Verify file integrity after extraction
+- 🔄 **Retry failed downloads** - Automatic retry with error recovery
+- 🗑️ **Smart cleanup** - Optional archive deletion after extraction
 
+### System Health & Installation
+- 💻 **System monitoring** - Track RAM, disk space, CPU cores, missing DLLs
+- ⚠️ **Pre-install checks** - Validate system requirements before installation
+- 🛠️ **Installation assistant** - One-click DLL installation and AV exclusions
+- 📝 **Installation logs** - Track success/failure with error analysis
+- 📈 **Community ratings** - Share installation difficulty and issues
+- 🔍 **Failure analysis** - AI-powered recommendations for failed installations
+
+### Windows Client Agent
+- 🖥️ **Distributed extraction** - Offload extraction to Windows clients
+- 🌐 **Multi-user support** - Track multiple clients on your network
+- 📡 **Real-time reporting** - Live extraction progress from each client
+- 🤖 **Auto-watch folders** - Automatically extract files dropped in watch folder
+- 🆔 **Client tracking** - Unique UUID per client with system info
+
+## Quick Start
+
+### Docker (Recommended)
+
+1. **Clone the repository:**
 ```bash
-git clone <repo-url> fitgirl-browser
-cd fitgirl-browser
+git clone https://github.com/ajgreenboy/fitgirl-browser.git fitgirl-scraper
+cd fitgirl-scraper
+```
+
+2. **Copy example config:**
+```bash
+cp docker-compose.example.yml docker-compose.yml
+# Edit docker-compose.yml with your settings
+```
+
+3. **Start the server:**
+```bash
 docker compose up -d --build
 ```
 
-First build takes a few minutes (Rust compilation). Access at `http://localhost:3030`.
+4. **Access the web UI:**
+Open `http://localhost:3030` in your browser.
 
-Click **Scrape** in the top bar to populate the database. Takes about 5 minutes.
+5. **Initial setup:**
+   - Click **Settings** and add your API keys (optional but recommended)
+   - Click **Scrape** to populate the database (~5 minutes)
 
-## Configuration
+### Building from Source
 
-All configuration is done through the web UI under **Settings**, or via environment variables in `docker-compose.yml`:
-
-| Variable | Description | Required |
-|---|---|---|
-| `RD_API_KEY` | Real-Debrid API key ([get one here](https://real-debrid.com/apitoken)) | No — only for download links |
-| `RAWG_API_KEY` | RAWG API key ([get one here](https://rawg.io/apidocs)) | No — only for gap-filling missing images |
-| `DOWNLOAD_DIR` | Path for downloaded files | No — defaults to `/app/downloads` |
-| `AUTO_EXTRACT` | Auto-extract archives after download | No — defaults to `true` |
-| `DELETE_ARCHIVES` | Delete archives after extraction | No — defaults to `false` |
-
-API keys set through the Settings UI are stored in the database and take priority over environment variables.
-
-## Volumes
-
-| Path | Purpose |
-|---|---|
-| `./data` | SQLite database (persists game data, settings, favorites) |
-| `./downloads` | Downloaded files |
-
-## Building from Source (no Docker)
-
-Requires Rust 1.85+.
+Requires Rust 1.85+ and SQLite.
 
 ```bash
 cargo build --release
 ./target/release/fitgirl-browser
 ```
 
-The binary serves the frontend from a `frontend/` directory relative to itself. Access at `http://localhost:3000`.
+Access at `http://localhost:3000`.
 
-## Reverse Proxy
+## Windows Client Agent
 
-If running behind Nginx, Caddy, Nginx Proxy Manager, etc., point it at port `3030` (or `3000` if running the binary directly).
+For distributed extraction and multi-user setups, deploy the Windows client agent on each PC.
+
+### Quick Setup
+
+1. **Download** `client-agent/fitgirl-client.exe` from this repository
+2. **Run** the executable - it creates a config file automatically
+3. **Configure** `%APPDATA%\FitGirlClient\config.toml`:
+   ```toml
+   [server]
+   url = "http://your-server-ip:3030"
+   enabled = true
+   
+   [extraction]
+   output_dir = "C:\Games"
+   watch_dir = "C:\Users\YourName\Downloads"
+   ```
+4. **Restart** the client
+
+See [client-agent/README.md](client-agent/README.md) for full documentation.
+
+## Configuration
+
+All configuration can be done through the web UI under **Settings**, or via environment variables.
+
+See [.env.example](.env.example) for all available options.
 
 ## Tech Stack
 
-- **Backend:** Rust, Axum, SQLite (sqlx)
-- **Frontend:** Vanilla JS, custom CSS
+- **Backend:** Rust (Axum framework, SQLite via sqlx)
+- **Frontend:** Vanilla JavaScript, custom CSS
 - **Scraping:** WordPress REST API, HTML parsing
-- **APIs:** RAWG (game metadata), Real-Debrid (download links)
+- **APIs:** Real-Debrid, RAWG
+- **Client Agent:** Rust (Windows-specific)
 
 ## License
 
 MIT
+
+## Disclaimer
+
+This tool is for educational purposes. Please support game developers by purchasing games legally.

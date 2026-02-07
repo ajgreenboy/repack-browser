@@ -22,3 +22,11 @@ Desktop.ini
 
 # Logs
 *.log
+
+# Environment variables and secrets
+.env
+.env.local
+docker-compose.override.yml
+
+# Claude Code local settings (contains local paths and permissions)
+.claude/
