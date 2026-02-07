@@ -1,6 +1,6 @@
 # Repack Browser
 
-A **self-hosted game repack browser** for households. Browse 7500+ games from multiple sources (FitGirl, SteamRIP), download directly to your PC, and auto-install with one click.
+A **self-hosted game repack browser** for households. Browse 6,600+ games from multiple sources (FitGirl, SteamRIP), download directly to your PC, and auto-install with one click.
 
 > **⚠️ For Personal/Household Use Only**
 >
@@ -10,23 +10,25 @@ A **self-hosted game repack browser** for households. Browse 7500+ games from mu
 
 ## 🎯 How It Works
 
-1. **Server** (Docker) - Hosts the game catalog, web interface, and ONE Real-Debrid account
+1. **Server** (Docker) - Hosts game catalog, web interface, and ONE Real-Debrid account
 2. **Windows Client** - Runs on each PC, downloads files to local disk
 3. **Web Browser** - Browse games from any device on your network
 
 **Workflow:**
 ```
-Browse website → Click Download → Server converts via Real-Debrid
+User clicks Download → Server converts magnet via Real-Debrid
   ↓
-Client polls server → Gets direct download URLs
+Client polls server (every 30s) → Gets direct download URLs
   ↓
-Client downloads to YOUR PC → Auto-extracts → Auto-installs → Reports progress
+Client downloads to YOUR PC → Auto-extracts → Auto-installs
+  ↓
+Client reports progress back to server
 ```
 
 **Key Points:**
-- Server admin sets up ONE Real-Debrid account for the household
+- Server admin sets up **ONE** Real-Debrid account for the household
 - All users share the same RD account (allowed by RD for same IP)
-- Downloads happen on each user's own PC, not on the server
+- Downloads happen on each user's **own PC**, not on the server
 - Client reports progress back to server for tracking
 
 ---
@@ -34,7 +36,7 @@ Client downloads to YOUR PC → Auto-extracts → Auto-installs → Reports prog
 ## ✨ Features
 
 ### 🎮 Game Catalog
-- **7500+ games** from FitGirl Repacks and SteamRIP
+- **6,600+ games** from FitGirl Repacks and SteamRIP
 - **Advanced search** with genre filtering and sorting
 - **Screenshot galleries** for each game
 - **Favorites system** to bookmark games
@@ -45,10 +47,12 @@ Client downloads to YOUR PC → Auto-extracts → Auto-installs → Reports prog
 - **Personal favorites** and download history per user
 - **Session-based authentication** with secure cookies
 - **Admin controls** for managing the system
+- **Client status tracking** - See which clients are online
 
 ### 📥 Smart Downloads
 - **Downloads to YOUR PC** - Not the server!
-- **Real-Debrid integration** - Converts magnets to fast direct downloads
+- **Real-Debrid integration** - Server converts magnets to fast direct downloads
+- **Background polling** - Client checks for new downloads every 30 seconds
 - **Progress tracking** - Real-time speed, ETA, and progress bars
 - **Auto-extraction** - Handles ZIP and 7Z archives
 - **Silent installation** - FitGirl repacks install automatically with no prompts
@@ -56,7 +60,7 @@ Client downloads to YOUR PC → Auto-extracts → Auto-installs → Reports prog
 
 ### 🔧 Windows Client Features
 - **Background polling** - Checks server for new downloads
-- **Download manager** - Downloads files to your local PC
+- **Download manager** - Handles multiple files with resume support
 - **Auto-extractor** - Extracts archives to your games folder
 - **Silent installer** - Runs FitGirl setups with `/VERYSILENT /LANG=english`
 - **Notifications** - Windows popups for download/extract/install status
@@ -74,6 +78,9 @@ Client downloads to YOUR PC → Auto-extracts → Auto-installs → Reports prog
 # Clone repository
 git clone https://github.com/ajgreenboy/repack-browser.git
 cd repack-browser
+
+# Set Real-Debrid API key (REQUIRED)
+export RD_API_KEY="your_real_debrid_api_key"
 
 # Start server
 docker compose up -d
@@ -120,6 +127,7 @@ cargo build --release --target x86_64-pc-windows-gnu
 [server]
 url = "http://your-server-ip:3030"
 enabled = true
+poll_interval_secs = 30
 
 [extraction]
 output_dir = "C:\\Games"
@@ -137,11 +145,13 @@ delete_after_extract = false
 
 ### Downloading Games
 
-1. **Browse** the website on your PC (where client is running)
+1. **Browse** the website (must have client running on same PC)
 2. **Click** a game to view details
 3. **Click** "Download" button
+   - Frontend checks if your client is connected
+   - If offline, you'll see an error message
 4. **Watch** notifications appear:
-   - "Processing Download..." (converting magnet via RD)
+   - "Download queued..." (server converting magnet)
    - "Downloading..." (file downloading to your PC)
    - "Download Complete! Extracting..."
    - "Extraction Complete! Installing..."
@@ -152,8 +162,8 @@ delete_after_extract = false
 ### If Download Fails
 
 **Error: "Could not connect to Repack Client"**
-- Make sure the Windows client is running on your PC
-- Client must be on the same PC as your browser
+- Client must be running on your PC
+- Check if client is polling server (should see activity every 30 seconds)
 
 **Error: "Real-Debrid is not configured"**
 - Server admin needs to configure RD API key on the server
@@ -169,6 +179,7 @@ delete_after_extract = false
 - Host game catalog (SQLite database)
 - Serve web interface
 - Handle user authentication
+- **Convert magnets via Real-Debrid** (server has ONE RD account)
 - Track download progress (reported by clients)
 
 **Does NOT:**
@@ -251,6 +262,7 @@ track_ram_usage = true
 - Passwords are bcrypt hashed
 - Session cookies are HTTP-only
 - 30-day session expiry
+- Per-user download tracking with user_id
 
 ### Real-Debrid
 - Server admin sets up ONE RD account for the household
@@ -294,12 +306,18 @@ docker compose restart
 # Re-scrape games
 ```
 
+**Real-Debrid not working:**
+- Check RD_API_KEY is set: `docker compose config | grep RD_API_KEY`
+- Verify API key is valid: https://real-debrid.com/apitoken
+- Check server logs: `docker compose logs | grep -i "real-debrid"`
+
 ### Client Issues
 
-**"Could not connect to Repack Client"**
-- Client must be running on same PC as browser
-- Check if `localhost:9999` is accessible
-- Firewall might be blocking port 9999
+**"No client registered" or "Client is offline"**
+- Client must be running on your PC
+- Check if client is polling server (should see periodic activity)
+- Verify `server.url` in config points to correct server address
+- Check firewall isn't blocking client
 
 **Downloads fail:**
 - Verify server has valid Real-Debrid API key configured
@@ -430,9 +448,10 @@ MIT License - See LICENSE file
 - ✅ Real-time progress reporting from clients
 - ✅ Silent FitGirl installations with desktop notifications
 - ✅ Multi-user authentication with per-user download tracking
+- ✅ Frontend validates client connection before allowing downloads
 
 ### Known Issues
-See [ARCHITECTURE_ISSUES.md](ARCHITECTURE_ISSUES.md) for technical details about ongoing refactoring work.
+See [GitHub Issues](https://github.com/ajgreenboy/repack-browser/issues) for current bugs and feature requests.
 
 ---
 
