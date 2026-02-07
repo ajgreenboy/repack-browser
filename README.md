@@ -1,4 +1,4 @@
-# FitGirl Scraper
+# Game Scraper
 
 A comprehensive self-hosted solution for browsing, downloading, and managing game repacks. Scrapes multiple sources (FitGirl Repacks, SteamRIP) with Real-Debrid integration, system health monitoring, and a Windows client agent for distributed extraction.
 
