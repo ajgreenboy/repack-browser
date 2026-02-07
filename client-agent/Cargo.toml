@@ -1,5 +1,5 @@
 [package]
-name = "fitgirl-client"
+name = "repack-client"
 version = "1.0.0"
 edition = "2021"
 
@@ -63,7 +63,7 @@ hostname = "0.3"
 dirs = "5.0"
 
 [[bin]]
-name = "fitgirl-client"
+name = "repack-client"
 path = "src/main.rs"
 
 [profile.release]

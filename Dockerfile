@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends     ca-certific
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /build/target/release/fitgirl-browser /app/fitgirl-browser
+COPY --from=builder /build/target/release/repack-browser /app/repack-browser
 
 # Copy frontend assets
 COPY frontend/ /app/frontend/
@@ -34,4 +34,4 @@ EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3     CMD curl -f http://localhost:3000/api/health || exit 1
 
-CMD ["/app/fitgirl-browser"]
+CMD ["/app/repack-browser"]

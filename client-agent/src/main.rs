@@ -65,7 +65,7 @@ impl SettingsWindow {
 impl eframe::App for SettingsWindow {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("FitGirl Auto-Installer Settings");
+            ui.heading("Repack Auto-Installer Settings");
             ui.add_space(10.0);
 
             // Explanation
@@ -204,7 +204,7 @@ fn add_to_startup() {
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     if let Ok(run_key) = hkcu.open_subkey_with_flags("Software\\Microsoft\\Windows\\CurrentVersion\\Run", KEY_SET_VALUE) {
-        if let Err(e) = run_key.set_value("FitGirlAutoInstaller", &exe_path_str) {
+        if let Err(e) = run_key.set_value("RepackAutoInstaller", &exe_path_str) {
             error!("Failed to add to startup: {}", e);
         } else {
             info!("Added to Windows startup");
@@ -216,7 +216,7 @@ fn add_to_startup() {
 fn remove_from_startup() {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     if let Ok(run_key) = hkcu.open_subkey_with_flags("Software\\Microsoft\\Windows\\CurrentVersion\\Run", KEY_SET_VALUE) {
-        let _ = run_key.delete_value("FitGirlAutoInstaller");
+        let _ = run_key.delete_value("RepackAutoInstaller");
         info!("Removed from Windows startup");
     }
 }
@@ -225,7 +225,7 @@ fn remove_from_startup() {
 fn is_in_startup() -> bool {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     if let Ok(run_key) = hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run") {
-        run_key.get_value::<String, _>("FitGirlAutoInstaller").is_ok()
+        run_key.get_value::<String, _>("RepackAutoInstaller").is_ok()
     } else {
         false
     }
@@ -265,7 +265,7 @@ async fn monitor_downloads(state: Arc<AppState>) {
             for entry in entries.flatten() {
                 let path = entry.path();
 
-                // Look for FitGirl installers (setup.exe, install.exe, etc.)
+                // Look for repack installers (setup.exe, install.exe, etc.)
                 if path.is_file() {
                     let filename = path.file_name()
                         .and_then(|n| n.to_str())
@@ -381,7 +381,7 @@ fn main() -> eframe::Result<()> {
         .filter_level(log::LevelFilter::Info)
         .init();
 
-    info!("FitGirl Auto-Installer starting...");
+    info!("Repack Auto-Installer starting...");
 
     // Load config
     let mut config = Config::load().unwrap_or_else(|e| {
@@ -430,12 +430,12 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([500.0, 400.0])
             .with_min_inner_size([450.0, 350.0])
-            .with_title("FitGirl Auto-Installer"),
+            .with_title("Repack Auto-Installer"),
         ..Default::default()
     };
 
     eframe::run_native(
-        "FitGirl Auto-Installer",
+        "Repack Auto-Installer",
         options,
         Box::new(move |_cc| Ok(Box::new(SettingsWindow::new(state)))),
     )

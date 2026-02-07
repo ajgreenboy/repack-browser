@@ -1,7 +1,7 @@
 services:
-  fitgirl-browser:
+  repack-browser:
     build: .
-    container_name: fitgirl-browser
+    container_name: repack-browser
     restart: unless-stopped
     ports:
       - "3030:3000"

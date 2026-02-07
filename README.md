@@ -1,6 +1,6 @@
-# Game Scraper
+# Repack Browser
 
-A comprehensive self-hosted solution for browsing, downloading, and managing game repacks. Scrapes multiple sources (FitGirl Repacks, SteamRIP) with Real-Debrid integration, system health monitoring, and a Windows client agent for distributed extraction.
+A comprehensive self-hosted solution for browsing, downloading, and managing game repacks from multiple sources. Features Real-Debrid integration, system health monitoring, and a Windows client agent for distributed extraction.
 
 > **⚠️ IMPORTANT: Real-Debrid Terms of Service**
 >
@@ -79,8 +79,8 @@ Do **NOT** expose this publicly or share access with people outside your househo
 
 1. **Clone the repository:**
 ```bash
-git clone https://github.com/ajgreenboy/fitgirl-browser.git fitgirl-scraper
-cd fitgirl-scraper
+git clone https://github.com/ajgreenboy/repack-browser.git repack-browser
+cd repack-browser
 ```
 
 2. **Copy example config:**
@@ -115,7 +115,7 @@ Requires Rust 1.85+ and SQLite.
 
 ```bash
 cargo build --release
-./target/release/fitgirl-browser
+./target/release/repack-browser
 ```
 
 Access at `http://localhost:3000`.
@@ -126,9 +126,9 @@ For distributed extraction and multi-user setups, deploy the Windows client agen
 
 ### Quick Setup
 
-1. **Download** `client-agent/fitgirl-client.exe` from this repository
+1. **Download** `client-agent/repack-client.exe` from this repository
 2. **Run** the executable - it creates a config file automatically
-3. **Configure** `%APPDATA%\FitGirlClient\config.toml`:
+3. **Configure** `%APPDATA%\RepackClient\config.toml`:
    ```toml
    [server]
    url = "http://your-server-ip:3030"

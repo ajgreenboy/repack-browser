@@ -1,4 +1,4 @@
-# FitGirl Client Agent
+# Repack Client Agent
 
 Windows desktop application for managing game downloads and installations.
 
@@ -49,7 +49,7 @@ Windows desktop application for managing game downloads and installations.
 
 ## Configuration
 
-Client config stored in `%APPDATA%\FitGirlClient\config.toml`:
+Client config stored in `%APPDATA%\RepackClient\config.toml`:
 
 ```toml
 [client]
@@ -73,7 +73,7 @@ track_ram_usage = true
 ## Usage
 
 ### **First Run**
-1. Launch `fitgirl-client.exe`
+1. Launch `repack-client.exe`
 2. System tray icon appears
 3. Right-click → Settings
 4. Configure server URL and output directory
@@ -98,7 +98,7 @@ cd client-agent
 cargo build --release
 ```
 
-Output: `target/release/fitgirl-client.exe` (~5MB)
+Output: `target/release/repack-client.exe` (~5MB)
 
 ## API Endpoints (Client → Server)
 
