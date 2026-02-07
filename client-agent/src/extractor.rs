@@ -205,3 +205,23 @@ impl Extractor {
         Ok(matches)
     }
 }
+
+// Standalone helper functions for simple extraction without progress tracking
+
+pub async fn extract_zip(
+    archive_path: &Path,
+    output_dir: &Path,
+) -> Result<(), String> {
+    let extractor = Extractor::new(archive_path.to_string_lossy().to_string());
+    extractor.extract_zip(archive_path, output_dir).await
+        .map_err(|e| e.to_string())
+}
+
+pub async fn extract_7z(
+    archive_path: &Path,
+    output_dir: &Path,
+) -> Result<(), String> {
+    let extractor = Extractor::new(archive_path.to_string_lossy().to_string());
+    extractor.extract_7z(archive_path, output_dir).await
+        .map_err(|e| e.to_string())
+}

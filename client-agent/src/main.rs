@@ -1,6 +1,7 @@
 mod client_id;
 mod config;
 mod downloader;
+mod download_processor;  // New download processor for full workflow
 mod extractor;
 mod local_server;
 mod realdebrid;
@@ -837,11 +838,30 @@ fn main() -> eframe::Result<()> {
         }
     });
 
-    // Start server queue polling (OLD ARCHITECTURE - will be removed)
+    // Start NEW download processor - polls server and handles full download workflow
     runtime.spawn({
         let state = state.clone();
         async move {
-            poll_server_queue(state).await;
+            loop {
+                let config = state.config.read().await;
+                if !config.server.enabled {
+                    drop(config);
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    continue;
+                }
+
+                let client_id = config.client.id.clone();
+                let output_dir = config.extraction.output_dir.clone();
+                let poll_interval = config.server.poll_interval_secs;
+                drop(config);
+
+                download_processor::poll_and_process_downloads(
+                    state.server_client.clone(),
+                    &client_id,
+                    &output_dir,
+                    poll_interval,
+                ).await;
+            }
         }
     });
 

@@ -19,6 +19,7 @@ pub struct DownloadRow {
     pub game_title: String,
     pub game_size: String,
     pub client_id: Option<String>,
+    pub user_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -229,6 +230,11 @@ pub async fn init_db(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
 
     // Migration: add client_id column for assigning downloads to specific clients
     let _ = sqlx::query("ALTER TABLE downloads ADD COLUMN client_id TEXT")
+        .execute(&pool)
+        .await;
+
+    // Migration: add user_id column to link downloads to users
+    let _ = sqlx::query("ALTER TABLE downloads ADD COLUMN user_id INTEGER")
         .execute(&pool)
         .await;
 
@@ -1066,6 +1072,7 @@ pub struct Client {
     pub id: i64,
     pub client_id: String,
     pub client_name: String,
+    pub user_id: Option<i64>,  // Link client to user
     pub os_version: Option<String>,
     pub ram_total_gb: Option<f64>,
     pub ram_available_gb: Option<f64>,

@@ -534,13 +534,38 @@ async function queueDownload(gameId) {
     const downloadBtn = document.getElementById('downloadBtn');
     if (downloadBtn) {
         downloadBtn.disabled = true;
-        downloadBtn.innerHTML = '<span class="spinner"></span> Queuing...';
+        downloadBtn.innerHTML = '<span class="spinner"></span> Checking client...';
     }
 
     try {
-        // NEW ARCHITECTURE: Send download request to LOCAL Windows client
-        // The client running on localhost:9999 will handle the download
-        const response = await fetch('http://localhost:9999/download', {
+        // Step 1: Check if user has a connected client
+        const statusResponse = await fetch(`${API_BASE}/clients/status`);
+        const clientStatus = await statusResponse.json();
+
+        if (!clientStatus.has_client) {
+            showToast('❌ No client registered. Please install and run the Windows client on your PC.', 'error');
+            if (downloadBtn) {
+                downloadBtn.disabled = false;
+                downloadBtn.innerHTML = 'Download';
+            }
+            return;
+        }
+
+        if (!clientStatus.client_online) {
+            showToast('❌ Client is offline. Please start the Windows client on your PC.', 'error');
+            if (downloadBtn) {
+                downloadBtn.disabled = false;
+                downloadBtn.innerHTML = 'Download';
+            }
+            return;
+        }
+
+        // Step 2: Client is online, create download on server
+        if (downloadBtn) {
+            downloadBtn.innerHTML = '<span class="spinner"></span> Creating download...';
+        }
+
+        const response = await fetch(`${API_BASE}/downloads/create`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ game_id: gameId })
@@ -549,8 +574,12 @@ async function queueDownload(gameId) {
         const data = await response.json();
 
         if (data.success) {
-            showToast('Download started on your PC! Check the Repack Client app for progress.', 'success');
+            showToast('✅ Download queued! Your client will start downloading shortly.', 'success');
             hideConfirmModal();
+            // Optionally refresh downloads view
+            if (typeof loadDownloads === 'function') {
+                setTimeout(() => loadDownloads(), 1000);
+            }
         } else {
             showToast(data.message || 'Failed to queue download', 'error');
             if (downloadBtn) {
@@ -559,9 +588,8 @@ async function queueDownload(gameId) {
             }
         }
     } catch (error) {
-        // If local client is not running, show helpful error
-        showToast('Could not connect to Repack Client. Make sure the client app is running on your PC.', 'error');
-        console.error('Local client connection error:', error);
+        showToast('Failed to queue download. Please try again.', 'error');
+        console.error('Queue download error:', error);
         if (downloadBtn) {
             downloadBtn.disabled = false;
             downloadBtn.innerHTML = 'Download';

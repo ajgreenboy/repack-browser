@@ -12,14 +12,24 @@ A **self-hosted game repack browser** for households. Browse 7500+ games from mu
 
 ## 🎯 How It Works
 
-1. **Server** (Docker) - Hosts the game catalog and web interface
-2. **Windows Client** - Runs on each PC, handles downloads/installs locally
+1. **Server** (Docker) - Hosts the game catalog, web interface, and ONE Real-Debrid account
+2. **Windows Client** - Runs on each PC, downloads files to local disk
 3. **Web Browser** - Browse games from any device on your network
 
 **Workflow:**
 ```
-Browse website → Click Download → Local client downloads to YOUR PC → Auto-extracts → Auto-installs
+Browse website → Click Download → Server converts via Real-Debrid
+  ↓
+Client polls server → Gets direct download URLs
+  ↓
+Client downloads to YOUR PC → Auto-extracts → Auto-installs → Reports progress
 ```
+
+**Key Points:**
+- Server admin sets up ONE Real-Debrid account for the household
+- All users share the same RD account (allowed by RD for same IP)
+- Downloads happen on each user's own PC, not on the server
+- Client reports progress back to server for tracking
 
 ---
 

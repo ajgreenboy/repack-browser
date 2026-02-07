@@ -1,6 +1,7 @@
 mod db;
 mod downloader;
 mod download_manager;
+mod client_downloads;  // New client-side download management
 mod extractor;
 mod installation_assistant;
 mod installation_checker;
@@ -37,6 +38,7 @@ struct AppState {
     rd_client: Arc<realdebrid::RealDebridClient>,
     scrape_status: Arc<RwLock<ScrapeStatus>>,
     download_manager: Arc<download_manager::DownloadManager>,
+    client_download_manager: Arc<client_downloads::ClientDownloadManager>,  // New client-side downloads
     rawg_api_key: String,
     scraper_registry: Arc<scrapers::registry::ScraperRegistry>,
 }
@@ -204,11 +206,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     scraper_registry.register(Arc::new(scrapers::steamrip::SteamRipScraper::new()));
     let scraper_registry = Arc::new(scraper_registry);
 
+    // Create client download manager (new architecture)
+    let client_dm = Arc::new(client_downloads::ClientDownloadManager::new(
+        db.clone(),
+        rd_client.clone(),
+    ));
+
     let state = AppState {
         db: db.clone(),
         rd_client,
         scrape_status: Arc::new(RwLock::new(ScrapeStatus::default())),
         download_manager: dm,
+        client_download_manager: client_dm,
         rawg_api_key,
         scraper_registry,
     };
@@ -242,16 +251,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Download management routes
         .route("/api/downloads", get(get_downloads))
         .route("/api/downloads", post(queue_download))
+        .route("/api/downloads/create", post(create_client_download))  // NEW: Create download for client architecture
         .route("/api/downloads/:id", get(get_download_status))
         .route("/api/downloads/:id", delete(cancel_download))
         .route("/api/downloads/:id/retry", post(retry_download))
         .route("/api/downloads/:id/remove", delete(remove_download))
+        .route("/api/downloads/:id/progress", post(update_download_progress))  // NEW: Update progress from client
         .route("/api/downloads/:id/install", post(launch_install))
         .route("/api/downloads/:id/installed", post(mark_installed))
         .route("/api/downloads/:id/validate", post(validate_download))
         .route("/api/downloads/:id/delete", delete(delete_download))
         .route("/api/downloads/scan", post(scan_existing_games))
         .route("/api/downloads/files/:file_id", get(download_file))
+        .route("/api/downloads/queue", get(get_client_download_queue))  // NEW: Get downloads for client
         // Settings routes
         .route("/api/settings", get(get_settings))
         .route("/api/settings", post(save_settings))
@@ -274,6 +286,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/clients/:client_id/progress", post(update_client_progress))
         .route("/api/clients/:client_id/system-info", post(update_client_system_info))
         .route("/api/clients", get(get_all_clients))
+        .route("/api/clients/status", get(get_user_client_status))  // Check if user has connected client
         // Health check
         .route("/api/health", get(health_check))
         // Static files
@@ -525,6 +538,17 @@ fn extract_session_token(headers: &HeaderMap) -> Option<String> {
                 None
             }
         })
+}
+
+// Helper function to get current user from session
+async fn get_current_user(db: &SqlitePool, headers: &HeaderMap) -> Result<db::User, String> {
+    let session_token = extract_session_token(headers)
+        .ok_or("No session token found")?;
+
+    db::get_user_by_session(db, &session_token)
+        .await
+        .map_err(|e| format!("Database error: {}", e))?
+        .ok_or("Invalid or expired session".to_string())
 }
 
 // ─── Game endpoints ───
@@ -1925,6 +1949,135 @@ async fn get_all_clients(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(clients))
+}
+
+/// Get client status for current user (check if they have a connected client)
+async fn get_user_client_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Get current user from session
+    let user = match get_current_user(&state.db, &headers).await {
+        Ok(user) => user,
+        Err(_) => return Ok(Json(serde_json::json!({
+            "has_client": false,
+            "client_online": false,
+            "message": "Not logged in"
+        }))),
+    };
+
+    // Get clients for this user
+    let clients = db::get_user_clients(&state.db, user.id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if clients.is_empty() {
+        return Ok(Json(serde_json::json!({
+            "has_client": false,
+            "client_online": false,
+            "message": "No client registered. Please install and run the Windows client on your PC."
+        })));
+    }
+
+    // Check if any client was seen recently (within last 2 minutes)
+    let now = chrono::Utc::now();
+    let mut has_online_client = false;
+
+    for client in &clients {
+        if let Ok(last_seen) = chrono::DateTime::parse_from_rfc3339(&client.last_seen) {
+            let elapsed = now.signed_duration_since(last_seen.with_timezone(&chrono::Utc));
+            if elapsed.num_seconds() < 120 {
+                has_online_client = true;
+                break;
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "has_client": true,
+        "client_online": has_online_client,
+        "client_count": clients.len(),
+        "message": if has_online_client {
+            "Client is online and ready"
+        } else {
+            "Client registered but offline. Please start the Windows client on your PC."
+        }
+    })))
+}
+
+// ─── NEW CLIENT-DOWNLOAD ARCHITECTURE ENDPOINTS ───
+
+/// Create a new download (client architecture)
+/// User clicks download button → Server converts magnet via RD → Creates download record
+async fn create_client_download(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<client_downloads::CreateDownloadRequest>,
+) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    // Get current user from session
+    let user = match get_current_user(&state.db, &headers).await {
+        Ok(user) => user,
+        Err(e) => return Err((StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false,
+            message: e,
+            downloads: None,
+            download_id: None,
+        }))),
+    };
+
+    // Create download
+    match state.client_download_manager.create_download(user.id, payload.game_id).await {
+        Ok(download_id) => Ok(Json(ApiResponse {
+            success: true,
+            message: "Download created and queued for your client".to_string(),
+            downloads: None,
+            download_id: Some(download_id),
+        })),
+        Err(e) => Err((StatusCode::BAD_REQUEST, Json(ApiResponse {
+            success: false,
+            message: e.to_string(),
+            downloads: None,
+            download_id: None,
+        }))),
+    }
+}
+
+/// Get download queue for a client
+/// Client polls this endpoint to get pending downloads
+async fn get_client_download_queue(
+    State(state): State<AppState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Vec<client_downloads::ClientDownloadInfo>>, (StatusCode, String)> {
+    let client_id = params.get("client_id")
+        .ok_or((StatusCode::BAD_REQUEST, "Missing client_id parameter".to_string()))?;
+
+    state.client_download_manager.get_client_queue(client_id)
+        .await
+        .map(Json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+/// Update download progress from client
+/// Client POSTs progress updates as it downloads/extracts/installs
+async fn update_download_progress(
+    State(state): State<AppState>,
+    Path(download_id): Path<i64>,
+    Json(update): Json<client_downloads::ProgressUpdate>,
+) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    match state.client_download_manager.update_progress(download_id, update).await {
+        Ok(_) => Ok(Json(ApiResponse {
+            success: true,
+            message: "Progress updated".to_string(),
+            downloads: None,
+            download_id: Some(download_id),
+        })),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
+            success: false,
+            message: e.to_string(),
+            downloads: None,
+            download_id: None,
+        }))),
+    }
 }
 
 async fn health_check(

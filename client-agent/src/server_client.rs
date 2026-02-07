@@ -23,13 +23,27 @@ struct RegisterResponse {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DownloadQueueItem {
-    pub download_id: i64,
+    pub id: i64,
     pub game_id: i64,
     pub game_title: String,
-    pub file_path: String,
-    pub installer_path: Option<String>,
+    pub game_size: String,
+    pub magnet_link: String,
+    pub direct_urls: Vec<String>,
     pub status: String,
-    pub expected_md5: Option<String>,
+    pub progress: f64,
+    pub download_speed: Option<String>,
+    pub eta: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProgressUpdate {
+    pub status: String,
+    pub progress: f64,
+    pub download_speed: Option<String>,
+    pub eta: Option<String>,
+    pub error_message: Option<String>,
 }
 
 impl ServerClient {
@@ -73,7 +87,7 @@ impl ServerClient {
         &self,
         client_id: &str,
     ) -> Result<Vec<DownloadQueueItem>, Box<dyn std::error::Error + Send + Sync>> {
-        let url = format!("{}/api/clients/{}/queue", self.base_url, client_id);
+        let url = format!("{}/api/downloads/queue?client_id={}", self.base_url, client_id);
 
         let response = self.client.get(&url).send().await?;
 
@@ -83,6 +97,26 @@ impl ServerClient {
 
         let queue: Vec<DownloadQueueItem> = response.json().await?;
         Ok(queue)
+    }
+
+    pub async fn update_download_progress(
+        &self,
+        download_id: i64,
+        update: &ProgressUpdate,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("{}/api/downloads/{}/progress", self.base_url, download_id);
+
+        let response = self.client
+            .post(&url)
+            .json(update)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(format!("Failed to update progress: {}", response.status()).into());
+        }
+
+        Ok(())
     }
 
     pub async fn report_progress(
