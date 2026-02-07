@@ -2,6 +2,25 @@
 
 A comprehensive self-hosted solution for browsing, downloading, and managing game repacks. Scrapes multiple sources (FitGirl Repacks, SteamRIP) with Real-Debrid integration, system health monitoring, and a Windows client agent for distributed extraction.
 
+> **⚠️ IMPORTANT: Real-Debrid Terms of Service**
+>
+> This application uses Real-Debrid for downloading. According to [Real-Debrid's Terms of Service](https://real-debrid.com/terms), each account is for **personal use only** and should only be used from **one household/IP address**.
+>
+> **✅ ALLOWED:** Multiple devices/users in the same household sharing one Real-Debrid account via this app
+>
+> **❌ NOT ALLOWED:** Sharing this installation publicly or with people outside your household
+>
+> **Your responsibility:** Comply with Real-Debrid's TOS. Account suspension/termination is possible if violated.
+
+## Self-Hosting
+
+This project is designed for **personal/household use**. You can:
+- Run it on your home server for yourself and household members
+- Use the multi-user authentication to separate each person's downloads and favorites
+- Connect multiple Windows clients from PCs in your home
+
+Do **NOT** expose this publicly or share access with people outside your household.
+
 ## Screenshots
 
 ### Library View
@@ -23,6 +42,13 @@ A comprehensive self-hosted solution for browsing, downloading, and managing gam
 - 🖼️ **Screenshot galleries** - View game screenshots before downloading
 - 🔗 **Real-Debrid integration** - Convert magnet links and DDL to direct downloads
 - 🎨 **RAWG API integration** - Auto-fill missing game metadata and images
+
+### Multi-User Authentication
+- 👥 **User accounts** - Separate login for each household member
+- 🔐 **Session-based auth** - Secure authentication with HTTP-only cookies
+- 🛡️ **Admin roles** - Admin users can manage the system
+- 📂 **Personal data** - Each user has their own favorites and download history
+- 🔑 **Default admin** - `admin` / `admin` (change immediately on first login)
 
 ### Download Management
 - 📥 **Queue system** - Manage multiple downloads
@@ -71,9 +97,17 @@ docker compose up -d --build
 4. **Access the web UI:**
 Open `http://localhost:3030` in your browser.
 
-5. **Initial setup:**
+5. **First login:**
+   - You'll be redirected to the login page
+   - Use the default admin account: **username:** `admin` **password:** `admin`
+   - ⚠️ **IMPORTANT:** Change the admin password immediately after first login!
+   - Create additional user accounts for household members via the Register page
+
+6. **Initial setup:**
    - Click **Settings** and add your API keys (optional but recommended)
-   - Click **Scrape** to populate the database (~5 minutes)
+     - `RD_API_KEY` - Your Real-Debrid API key ([get it here](https://real-debrid.com/apitoken))
+     - `RAWG_API_KEY` - RAWG API key for game metadata ([get it here](https://rawg.io/apidocs))
+   - Click **Scrape** to populate the database (~5 minutes, ~7500 games)
 
 ### Building from Source
 
@@ -107,6 +141,46 @@ For distributed extraction and multi-user setups, deploy the Windows client agen
 4. **Restart** the client
 
 See [client-agent/README.md](client-agent/README.md) for full documentation.
+
+## Security
+
+### ⚠️ Change Default Admin Password
+
+The application creates a default admin account on first run:
+- **Username:** `admin`
+- **Password:** `admin`
+
+**You MUST change this password immediately:**
+1. Log in with the default credentials
+2. Create a new admin account with your own credentials
+3. (Future update will include password change feature)
+
+### Secret Management
+
+The repository uses proper secret management:
+- ✅ `.env` file is gitignored (never committed)
+- ✅ `.env.example` provided as template (no real secrets)
+- ✅ `docker-compose.override.yml` gitignored (for local config)
+- ✅ API keys should be set via environment variables or Settings UI
+
+**Never commit:**
+- Real-Debrid API keys
+- RAWG API keys
+- Database files
+- Download directories
+- Personal configurations
+
+### Network Security
+
+**For household use:**
+- Run behind your home router/firewall
+- Don't expose port 3030 to the internet
+- Use VPN/Tailscale if accessing remotely from outside your home
+
+**Authentication:**
+- Session cookies are HTTP-only and secure
+- 30-day session expiry
+- Bcrypt password hashing
 
 ## Configuration
 
