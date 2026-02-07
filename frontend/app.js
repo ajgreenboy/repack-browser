@@ -538,7 +538,9 @@ async function queueDownload(gameId) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/downloads`, {
+        // NEW ARCHITECTURE: Send download request to LOCAL Windows client
+        // The client running on localhost:9999 will handle the download
+        const response = await fetch('http://localhost:9999/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ game_id: gameId })
@@ -547,10 +549,8 @@ async function queueDownload(gameId) {
         const data = await response.json();
 
         if (data.success) {
-            showToast('Added to download queue!', 'success');
+            showToast('Download started on your PC! Check the Repack Client app for progress.', 'success');
             hideConfirmModal();
-            // Switch to downloads view
-            showView('downloads');
         } else {
             showToast(data.message || 'Failed to queue download', 'error');
             if (downloadBtn) {
@@ -559,7 +559,9 @@ async function queueDownload(gameId) {
             }
         }
     } catch (error) {
-        showToast('Error queuing download', 'error');
+        // If local client is not running, show helpful error
+        showToast('Could not connect to Repack Client. Make sure the client app is running on your PC.', 'error');
+        console.error('Local client connection error:', error);
         if (downloadBtn) {
             downloadBtn.disabled = false;
             downloadBtn.innerHTML = 'Download';

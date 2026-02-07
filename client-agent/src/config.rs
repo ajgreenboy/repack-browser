@@ -5,6 +5,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub client: ClientConfig,
     pub server: ServerConfig,
+    pub realdebrid: RealDebridConfig,
     pub extraction: ExtractionConfig,
     pub monitoring: MonitoringConfig,
 }
@@ -31,6 +32,12 @@ pub struct ExtractionConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RealDebridConfig {
+    pub api_key: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitoringConfig {
     pub report_interval_secs: u64,
     pub track_ram_usage: bool,
@@ -50,6 +57,10 @@ impl Default for Config {
                 url: "http://homelab:3030".to_string(),
                 enabled: true,
                 poll_interval_secs: 30,
+            },
+            realdebrid: RealDebridConfig {
+                api_key: String::new(), // Must be configured by user
+                enabled: false, // Disabled until API key is set
             },
             extraction: ExtractionConfig {
                 output_dir: PathBuf::from("C:\\Games"),

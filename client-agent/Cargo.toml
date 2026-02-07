@@ -7,8 +7,13 @@ edition = "2021"
 # Core async runtime
 tokio = { version = "1", features = ["full"] }
 
-# HTTP client for server communication
-reqwest = { version = "0.11", features = ["json"] }
+# HTTP client for server communication and file downloads
+reqwest = { version = "0.11", features = ["json", "stream"] }
+
+# HTTP server for local browser communication
+warp = "0.3"
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

@@ -1,6 +1,8 @@
 mod client_id;
 mod config;
 mod extractor;
+mod local_server;
+mod realdebrid;
 mod server_client;
 mod system_info;
 
@@ -29,6 +31,7 @@ use winreg::RegKey;
 struct AppState {
     config: Arc<RwLock<Config>>,
     server_client: Arc<ServerClient>,
+    local_server_state: Arc<local_server::LocalServerState>,
     runtime: Arc<Runtime>,
     status: Arc<RwLock<String>>,
     current_installation: Arc<RwLock<Option<InstallationInfo>>>,
@@ -318,7 +321,45 @@ async fn extract_7z(file_path: &std::path::Path, output_dir: &std::path::Path) -
         .map_err(|e| format!("Failed to extract 7z: {}", e))
 }
 
-/// Poll the server for new downloads in the queue
+/// Process downloads queued from the browser
+async fn process_download_queue(state: Arc<AppState>) {
+    let mut interval = time::interval(Duration::from_secs(2));
+
+    loop {
+        interval.tick().await;
+
+        // Check if there are pending downloads from the browser
+        let pending = {
+            let mut queue = state.local_server_state.pending_downloads.write().await;
+            if queue.is_empty() {
+                continue;
+            }
+            queue.drain(..).collect::<Vec<_>>()
+        };
+
+        for download_req in pending {
+            info!("Processing download request for game_id: {}", download_req.game_id);
+
+            // Update status
+            {
+                let mut status = state.status.write().await;
+                *status = format!("Downloading game ID {}...", download_req.game_id);
+            }
+
+            // TODO: Fetch game info from server
+            // TODO: Use Real-Debrid to convert magnet to direct link
+            // TODO: Download file with progress tracking
+            // TODO: Extract after download completes
+            // For now, just log
+            show_notification(
+                "Download Started",
+                &format!("Started downloading game ID {}. (Full implementation in progress)", download_req.game_id)
+            );
+        }
+    }
+}
+
+/// Poll the server for new downloads in the queue (OLD ARCHITECTURE - to be removed)
 async fn poll_server_queue(state: Arc<AppState>) {
     let mut interval = time::interval(Duration::from_secs(60)); // Poll every 60 seconds
 
@@ -617,10 +658,14 @@ fn main() -> eframe::Result<()> {
     // Create server client
     let server_client = Arc::new(ServerClient::new(config.server.url.clone()));
 
+    // Create local server state for browser communication
+    let local_server_state = Arc::new(local_server::LocalServerState::new());
+
     // Create app state
     let state = Arc::new(AppState {
         config: Arc::new(RwLock::new(config)),
         server_client,
+        local_server_state: local_server_state.clone(),
         runtime: runtime.clone(),
         status: Arc::new(RwLock::new("Idle - waiting for downloads".to_string())),
         current_installation: Arc::new(RwLock::new(None)),
@@ -643,11 +688,27 @@ fn main() -> eframe::Result<()> {
         }
     });
 
-    // Start server queue polling
+    // Start server queue polling (OLD ARCHITECTURE - will be removed)
     runtime.spawn({
         let state = state.clone();
         async move {
             poll_server_queue(state).await;
+        }
+    });
+
+    // Start local HTTP server for browser communication
+    runtime.spawn({
+        let local_state = local_server_state.clone();
+        async move {
+            local_server::start_local_server(local_state).await;
+        }
+    });
+
+    // Start download processor - processes downloads queued from browser
+    runtime.spawn({
+        let state = state.clone();
+        async move {
+            process_download_queue(state).await;
         }
     });
 
