@@ -2,6 +2,7 @@ mod db;
 mod downloader;
 mod download_manager;
 mod extractor;
+mod installation_assistant;
 mod installation_checker;
 mod md5_validator;
 mod rawg;
@@ -220,6 +221,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // System information
         .route("/api/system-info", get(get_system_info))
         .route("/api/pre-install-check/:game_id", get(check_pre_install))
+        // Installation assistant
+        .route("/api/assistant/actions", post(get_assistant_actions))
+        .route("/api/assistant/install-dll", post(assistant_install_dll))
+        .route("/api/assistant/add-exclusion", post(assistant_add_exclusion))
+        .route("/api/assistant/toggle-av", post(assistant_toggle_av))
+        .route("/api/assistant/dependency-info/:dep", get(get_dependency_info))
         // Health check
         .route("/api/health", get(health_check))
         // Static files
@@ -1303,6 +1310,112 @@ async fn check_pre_install(
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Pre-installation check failed: {}", e),
+        )),
+    }
+}
+
+// ─── Installation Assistant Handlers ───
+
+#[derive(Deserialize)]
+struct AssistantActionsRequest {
+    missing_dlls: Vec<String>,
+    missing_dependencies: Vec<String>,
+    antivirus_active: bool,
+    install_path: Option<String>,
+}
+
+async fn get_assistant_actions(
+    Json(req): Json<AssistantActionsRequest>,
+) -> Json<Vec<installation_assistant::AssistantAction>> {
+    let actions = installation_assistant::get_recommended_actions(
+        &req.missing_dlls,
+        &req.missing_dependencies,
+        req.antivirus_active,
+        req.install_path.as_deref(),
+    );
+    Json(actions)
+}
+
+#[derive(Deserialize)]
+struct InstallDllRequest {
+    dll_name: String,
+}
+
+async fn assistant_install_dll(
+    Json(req): Json<InstallDllRequest>,
+) -> Result<Json<ApiResponse>, (StatusCode, String)> {
+    match installation_assistant::install_dll(&req.dll_name).await {
+        Ok(message) => Ok(Json(ApiResponse {
+            success: true,
+            message,
+            downloads: None,
+            download_id: None,
+        })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("DLL installation failed: {}", e),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+struct AddExclusionRequest {
+    path: String,
+}
+
+async fn assistant_add_exclusion(
+    Json(req): Json<AddExclusionRequest>,
+) -> Result<Json<ApiResponse>, (StatusCode, String)> {
+    match installation_assistant::add_av_exclusion(&req.path).await {
+        Ok(message) => Ok(Json(ApiResponse {
+            success: true,
+            message,
+            downloads: None,
+            download_id: None,
+        })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to add exclusion: {}", e),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+struct ToggleAvRequest {
+    enable: bool,
+}
+
+async fn assistant_toggle_av(
+    Json(req): Json<ToggleAvRequest>,
+) -> Result<Json<ApiResponse>, (StatusCode, String)> {
+    let result = if req.enable {
+        installation_assistant::enable_realtime_protection().await
+    } else {
+        installation_assistant::disable_realtime_protection().await
+    };
+
+    match result {
+        Ok(message) => Ok(Json(ApiResponse {
+            success: true,
+            message,
+            downloads: None,
+            download_id: None,
+        })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to toggle antivirus: {}", e),
+        )),
+    }
+}
+
+async fn get_dependency_info(
+    Path(dep): Path<String>,
+) -> Result<Json<installation_assistant::DependencyInfo>, (StatusCode, String)> {
+    match installation_assistant::get_dependency_installer_info(&dep) {
+        Some(info) => Ok(Json(info)),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            format!("No installer information available for: {}", dep),
         )),
     }
 }
