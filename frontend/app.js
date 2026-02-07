@@ -65,10 +65,11 @@ document.addEventListener('keydown', (e) => {
     // f: toggle favorites
     if (e.key === 'f') { toggleFavoritesView(); return; }
 
-    // 0: home, 1: games view, 2: downloads view
+    // 0: home, 1: games view, 2: downloads view, 3: system health
     if (e.key === '0') { showView('home'); return; }
     if (e.key === '1') { showView('games'); return; }
     if (e.key === '2') { showView('downloads'); return; }
+    if (e.key === '3') { showView('systemHealth'); return; }
 });
 
 // ─── View switching ───
@@ -78,15 +79,21 @@ function showView(view) {
     document.getElementById('homeView').classList.toggle('hidden', view !== 'home');
     document.getElementById('gamesView').classList.toggle('hidden', view !== 'games');
     document.getElementById('downloadsView').classList.toggle('hidden', view !== 'downloads');
+    document.getElementById('systemHealthView').classList.toggle('hidden', view !== 'systemHealth');
     document.getElementById('navHome').classList.toggle('active', view === 'home');
     document.getElementById('navGames').classList.toggle('active', view === 'games');
     document.getElementById('navDownloads').classList.toggle('active', view === 'downloads');
+    document.getElementById('navSystemHealth').classList.toggle('active', view === 'systemHealth');
 
     if (view === 'downloads') {
         loadDownloads();
         startDownloadPolling();
     } else {
         stopDownloadPolling();
+    }
+
+    if (view === 'systemHealth') {
+        loadSystemHealth();
     }
 }
 
@@ -1471,4 +1478,266 @@ async function saveSettings() {
     } catch (error) {
         showToast('Failed to save settings', 'error');
     }
+}
+
+// ─── System Health & Installation Assistant ───
+
+async function loadSystemHealth() {
+    await Promise.all([
+        loadSystemInfo(),
+        loadInstallationStats(),
+        loadInstallationLogs()
+    ]);
+}
+
+async function loadSystemInfo() {
+    const container = document.getElementById('systemInfoContent');
+    try {
+        const response = await fetch(`${API_BASE}/system-info`);
+        const data = await response.json();
+
+        const statusColor = data.overall_status === 'Ready' ? 'var(--green)' :
+                           data.overall_status === 'Warning' ? 'var(--gold)' : 'var(--red)';
+        const statusIcon = data.overall_status === 'Ready' ? '✅' :
+                          data.overall_status === 'Warning' ? '⚠️' : '❌';
+
+        container.innerHTML = `
+            <div style="display:grid;gap:1rem;">
+                <div style="display:flex;align-items:center;gap:0.75rem;padding:1rem;background:var(--bg-surface);border-radius:8px;">
+                    <div style="font-size:2rem;">${statusIcon}</div>
+                    <div>
+                        <div style="font-weight:600;color:${statusColor};font-size:1.1rem;">${data.overall_status}</div>
+                        <div style="font-size:0.875rem;color:var(--text-muted);">System Status</div>
+                    </div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0.75rem;">
+                    <div style="background:var(--bg-surface);padding:1rem;border-radius:8px;">
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.25rem;">RAM Available</div>
+                        <div style="font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">${data.ram_available_gb.toFixed(1)} GB</div>
+                        <div style="font-size:0.7rem;color:var(--text-dim);">of ${data.ram_total_gb.toFixed(1)} GB</div>
+                    </div>
+                    <div style="background:var(--bg-surface);padding:1rem;border-radius:8px;">
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.25rem;">Temp Space</div>
+                        <div style="font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">${data.temp_space_gb.toFixed(1)} GB</div>
+                        <div style="font-size:0.7rem;color:var(--text-dim);">available</div>
+                    </div>
+                    <div style="background:var(--bg-surface);padding:1rem;border-radius:8px;">
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.25rem;">CPU Cores</div>
+                        <div style="font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace;">${data.cpu_cores}</div>
+                        <div style="font-size:0.7rem;color:var(--text-dim);">cores detected</div>
+                    </div>
+                    <div style="background:var(--bg-surface);padding:1rem;border-radius:8px;">
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.25rem;">Antivirus</div>
+                        <div style="font-size:1.5rem;font-weight:700;">${data.antivirus_active ? '🛡️' : '✅'}</div>
+                        <div style="font-size:0.7rem;color:var(--text-dim);">${data.antivirus_active ? 'Active' : 'Inactive'}</div>
+                    </div>
+                </div>
+
+                ${data.issues && data.issues.length > 0 ? `
+                    <div style="background:var(--red-dim);border:1px solid rgba(239,68,68,0.25);border-radius:8px;padding:1rem;">
+                        <div style="font-weight:600;margin-bottom:0.5rem;color:var(--red);">Issues Found:</div>
+                        ${data.issues.map(issue => `<div style="font-size:0.875rem;margin-bottom:0.25rem;">• ${issue}</div>`).join('')}
+                    </div>
+                ` : ''}
+
+                ${data.recommendations && data.recommendations.length > 0 ? `
+                    <div style="background:var(--bg-surface);border-radius:8px;padding:1rem;">
+                        <div style="font-weight:600;margin-bottom:0.5rem;">Recommendations:</div>
+                        ${data.recommendations.map(rec => `<div style="font-size:0.875rem;color:var(--text-muted);margin-bottom:0.25rem;">• ${rec}</div>`).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = '<div style="color:var(--red);text-align:center;padding:2rem;">Failed to load system information</div>';
+    }
+}
+
+async function loadInstallationStats() {
+    const container = document.getElementById('installStatsContent');
+    try {
+        const response = await fetch(`${API_BASE}/installation/stats`);
+        const stats = await response.json();
+
+        container.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0.75rem;">
+                <div style="background:var(--bg-surface);padding:1rem;border-radius:8px;text-align:center;">
+                    <div style="font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">${stats.total_installs}</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">Total Installs</div>
+                </div>
+                <div style="background:var(--green-dim);padding:1rem;border-radius:8px;text-align:center;">
+                    <div style="font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--green);">${stats.successful_installs}</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">Successful</div>
+                </div>
+                <div style="background:var(--red-dim);padding:1rem;border-radius:8px;text-align:center;">
+                    <div style="font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--red);">${stats.failed_installs}</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">Failed</div>
+                </div>
+                <div style="background:var(--bg-surface);padding:1rem;border-radius:8px;text-align:center;">
+                    <div style="font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">${stats.success_rate.toFixed(0)}%</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">Success Rate</div>
+                </div>
+                <div style="background:var(--bg-surface);padding:1rem;border-radius:8px;text-align:center;">
+                    <div style="font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">${stats.avg_duration_minutes.toFixed(0)}<span style="font-size:1rem;color:var(--text-muted);">m</span></div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">Avg Duration</div>
+                </div>
+                <div style="background:var(--bg-surface);padding:1rem;border-radius:8px;text-align:center;">
+                    <div style="font-size:2rem;font-weight:700;font-family:'JetBrains Mono',monospace;">${stats.avg_ram_usage_gb.toFixed(1)}<span style="font-size:1rem;color:var(--text-muted);">GB</span></div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">Avg RAM Usage</div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = '<div style="color:var(--red);text-align:center;padding:2rem;">Failed to load installation statistics</div>';
+    }
+}
+
+async function loadInstallationLogs() {
+    const container = document.getElementById('installLogsContent');
+    try {
+        const response = await fetch(`${API_BASE}/installation/stats`); // We'll show recent from all logs
+        const logs = []; // Placeholder - would need endpoint to get recent logs
+
+        if (logs.length === 0) {
+            container.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-muted);">No installation logs yet</div>';
+            return;
+        }
+
+        container.innerHTML = logs.map(log => `
+            <div style="background:var(--bg-surface);border-radius:8px;padding:1rem;margin-bottom:0.75rem;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
+                    <div style="font-weight:600;">Game ID: ${log.game_id}</div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);">${new Date(log.started_at).toLocaleString()}</div>
+                </div>
+                <div style="display:flex;gap:0.5rem;font-size:0.875rem;">
+                    <span style="color:${log.status === 'completed' ? 'var(--green)' : 'var(--red)'};">${log.status.toUpperCase()}</span>
+                    ${log.install_duration_minutes ? `<span>• ${log.install_duration_minutes}m</span>` : ''}
+                    ${log.ram_usage_peak ? `<span>• ${log.ram_usage_peak.toFixed(1)}GB RAM</span>` : ''}
+                </div>
+            </div>
+        `).join('');
+    } catch (error) {
+        container.innerHTML = '<div style="color:var(--red);text-align:center;padding:2rem;">Failed to load installation logs</div>';
+    }
+}
+
+// Pre-Installation Check Modal
+async function showPreInstallCheck(gameId) {
+    document.getElementById('preInstallModal').classList.remove('hidden');
+    const content = document.getElementById('preInstallContent');
+
+    try {
+        const response = await fetch(`${API_BASE}/pre-install-check/${gameId}`);
+        const result = await response.json();
+
+        const statusColor = result.overall_status === 'Pass' ? 'var(--green)' :
+                           result.overall_status === 'Warning' ? 'var(--gold)' : 'var(--red)';
+        const statusIcon = result.overall_status === 'Pass' ? '✅' :
+                          result.overall_status === 'Warning' ? '⚠️' : '🚫';
+
+        content.innerHTML = `
+            <div style="text-align:center;padding:1rem;background:var(--bg-surface);border-radius:8px;margin-bottom:1rem;">
+                <div style="font-size:3rem;margin-bottom:0.5rem;">${statusIcon}</div>
+                <div style="font-size:1.5rem;font-weight:700;color:${statusColor};">${result.overall_status}</div>
+                <div style="font-size:0.875rem;color:var(--text-muted);margin-top:0.25rem;">${result.can_proceed ? 'You can proceed with installation' : 'Please resolve issues before installing'}</div>
+            </div>
+
+            <div style="display:grid;gap:0.5rem;margin-bottom:1rem;">
+                ${result.checks.map(check => {
+                    const checkColor = check.status === 'Pass' ? 'var(--green)' :
+                                     check.status === 'Warning' ? 'var(--gold)' : 'var(--red)';
+                    const checkIcon = check.status === 'Pass' ? '✓' :
+                                     check.status === 'Warning' ? '⚠' : '✗';
+                    return `
+                        <div style="display:flex;gap:0.75rem;padding:0.75rem;background:var(--bg-surface);border-radius:8px;">
+                            <div style="color:${checkColor};font-weight:700;flex-shrink:0;">${checkIcon}</div>
+                            <div>
+                                <div style="font-weight:600;font-size:0.875rem;">${check.name}</div>
+                                <div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.25rem;">${check.message}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+
+            ${result.blockers && result.blockers.length > 0 ? `
+                <div style="background:var(--red-dim);border:1px solid rgba(239,68,68,0.25);border-radius:8px;padding:1rem;margin-bottom:1rem;">
+                    <div style="font-weight:700;color:var(--red);margin-bottom:0.5rem;">🚫 Blocking Issues:</div>
+                    ${result.blockers.map(b => `<div style="font-size:0.875rem;margin-bottom:0.25rem;">• ${b}</div>`).join('')}
+                </div>
+            ` : ''}
+
+            ${result.recommendations && result.recommendations.length > 0 ? `
+                <div style="background:var(--bg-surface);border-radius:8px;padding:1rem;">
+                    <div style="font-weight:600;margin-bottom:0.5rem;">💡 Recommendations:</div>
+                    ${result.recommendations.map(r => `<div style="font-size:0.875rem;color:var(--text-muted);margin-bottom:0.25rem;">• ${r}</div>`).join('')}
+                </div>
+            ` : ''}
+
+            ${!result.can_proceed ? '<div style="text-align:center;margin-top:1rem;"><button onclick="showInstallAssistant()" class="btn btn-primary">Open Installation Assistant</button></div>' : ''}
+        `;
+    } catch (error) {
+        content.innerHTML = '<div style="color:var(--red);text-align:center;padding:2rem;">Failed to run pre-installation check</div>';
+    }
+}
+
+function hidePreInstallModal() {
+    document.getElementById('preInstallModal').classList.add('hidden');
+}
+
+// Installation Assistant Modal
+async function showInstallAssistant() {
+    hidePreInstallModal();
+    document.getElementById('assistantModal').classList.remove('hidden');
+    const content = document.getElementById('assistantActions');
+
+    try {
+        // Get system info first
+        const sysResponse = await fetch(`${API_BASE}/system-info`);
+        const sysData = await sysResponse.json();
+
+        // Get recommended actions
+        const actionsResponse = await fetch(`${API_BASE}/assistant/actions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                missing_dlls: sysData.missing_dlls || [],
+                missing_dependencies: sysData.missing_dependencies || [],
+                antivirus_active: sysData.antivirus_active,
+                install_path: 'C:\\Games' // Default path
+            })
+        });
+        const actions = await actionsResponse.json();
+
+        if (actions.length === 0) {
+            content.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--green);">✅ Your system is ready! No actions needed.</div>';
+            return;
+        }
+
+        content.innerHTML = actions.map(action => `
+            <div style="background:var(--bg-surface);border-radius:8px;padding:1rem;margin-bottom:0.75rem;">
+                <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.5rem;">
+                    <div>
+                        <div style="font-weight:600;margin-bottom:0.25rem;">${action.name}</div>
+                        <div style="font-size:0.875rem;color:var(--text-muted);">${action.description}</div>
+                    </div>
+                    ${action.required ? '<span style="background:var(--red);color:white;padding:0.25rem 0.5rem;border-radius:4px;font-size:0.7rem;font-weight:700;">REQUIRED</span>' : ''}
+                </div>
+                <button onclick="executeAssistantAction('${action.id}')" class="btn btn-primary btn-sm" style="margin-top:0.5rem;">Execute</button>
+            </div>
+        `).join('');
+    } catch (error) {
+        content.innerHTML = '<div style="color:var(--red);text-align:center;padding:2rem;">Failed to load assistant actions</div>';
+    }
+}
+
+function hideAssistantModal() {
+    document.getElementById('assistantModal').classList.add('hidden');
+}
+
+async function executeAssistantAction(actionId) {
+    // This would call the appropriate endpoint based on action ID
+    showToast(`Executing ${actionId}...`, 'info');
+    // Implementation would vary by action type
 }

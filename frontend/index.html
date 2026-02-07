@@ -173,6 +173,7 @@
                 <button id="navDownloads" onclick="showView('downloads')" class="nav-btn">Downloads</button>
                 <span id="downloadBadge" class="download-badge hidden">0</span>
             </div>
+            <button id="navSystemHealth" onclick="showView('systemHealth')" class="nav-btn">System Health</button>
         </nav>
         <div class="topbar-spacer"></div>
         <div class="topbar-actions">
@@ -393,6 +394,74 @@
                 <p id="rdKeyStatus" class="form-status"></p>
             </div>
             <div class="modal-actions"><button onclick="saveSettings()" class="btn btn-primary">Save</button><button onclick="hideSettingsModal()" class="btn btn-secondary">Cancel</button></div>
+        </div>
+    </div>
+
+    <!-- Pre-Installation Check Modal -->
+    <div id="preInstallModal" class="hidden modal-overlay">
+        <div class="modal-box lg">
+            <h2 class="modal-title">📋 Pre-Installation Check</h2>
+            <div id="preInstallContent" style="margin:1rem 0;">
+                <div style="text-align:center;padding:2rem;">
+                    <div class="spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+                    <p style="color:var(--text-muted);">Checking system readiness...</p>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button onclick="hidePreInstallModal()" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Installation Assistant Modal -->
+    <div id="assistantModal" class="hidden modal-overlay">
+        <div class="modal-box lg">
+            <h2 class="modal-title">🛠️ Installation Assistant</h2>
+            <div id="assistantContent" style="margin:1rem 0;">
+                <p style="color:var(--text-muted);margin-bottom:1rem;">Prepare your system for installation:</p>
+                <div id="assistantActions"></div>
+            </div>
+            <div class="modal-actions">
+                <button onclick="hideAssistantModal()" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Health View -->
+    <div id="systemHealthView" class="hidden">
+        <div style="display:grid;gap:1.5rem;">
+            <!-- System Info Card -->
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;">
+                <h2 style="font-size:1.35rem;font-weight:700;margin-bottom:1rem;">💻 System Information</h2>
+                <div id="systemInfoContent">
+                    <div style="text-align:center;padding:2rem;">
+                        <div class="spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+                        <p style="color:var(--text-muted);">Loading system info...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Installation Statistics -->
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;">
+                <h2 style="font-size:1.35rem;font-weight:700;margin-bottom:1rem;">📊 Installation Statistics</h2>
+                <div id="installStatsContent">
+                    <div style="text-align:center;padding:2rem;">
+                        <div class="spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+                        <p style="color:var(--text-muted);">Loading statistics...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Installation Logs -->
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;">
+                <h2 style="font-size:1.35rem;font-weight:700;margin-bottom:1rem;">📜 Recent Installation Logs</h2>
+                <div id="installLogsContent">
+                    <div style="text-align:center;padding:2rem;">
+                        <div class="spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+                        <p style="color:var(--text-muted);">Loading logs...</p>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
