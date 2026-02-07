@@ -1,5 +1,6 @@
 mod client_id;
 mod config;
+mod downloader;
 mod extractor;
 mod local_server;
 mod realdebrid;
@@ -340,23 +341,171 @@ async fn process_download_queue(state: Arc<AppState>) {
         for download_req in pending {
             info!("Processing download request for game_id: {}", download_req.game_id);
 
-            // Update status
-            {
-                let mut status = state.status.write().await;
-                *status = format!("Downloading game ID {}...", download_req.game_id);
-            }
+            // Clone state for async move
+            let state_clone = state.clone();
+            let game_id = download_req.game_id;
 
-            // TODO: Fetch game info from server
-            // TODO: Use Real-Debrid to convert magnet to direct link
-            // TODO: Download file with progress tracking
-            // TODO: Extract after download completes
-            // For now, just log
-            show_notification(
-                "Download Started",
-                &format!("Started downloading game ID {}. (Full implementation in progress)", download_req.game_id)
-            );
+            // Spawn download task
+            tokio::spawn(async move {
+                if let Err(e) = process_single_download(state_clone, game_id).await {
+                    error!("Download failed: {}", e);
+                    show_notification(
+                        "Download Failed",
+                        &format!("Failed to download game: {}", e)
+                    );
+                }
+            });
         }
     }
+}
+
+/// Process a single download from start to finish
+async fn process_single_download(state: Arc<AppState>, game_id: i64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Step 1: Fetch game info from server
+    info!("Fetching game info for ID: {}", game_id);
+
+    let config = state.config.read().await;
+    let server_url = config.server.url.clone();
+    let rd_api_key = config.realdebrid.api_key.clone();
+    let rd_enabled = config.realdebrid.enabled;
+    let output_dir = config.extraction.output_dir.clone();
+    drop(config);
+
+    // Update status
+    {
+        let mut status = state.status.write().await;
+        *status = format!("Fetching game info...");
+    }
+
+    let client = reqwest::Client::new();
+    let game_response = client
+        .get(&format!("{}/api/games/{}", server_url, game_id))
+        .send()
+        .await?;
+
+    if !game_response.status().is_success() {
+        return Err(format!("Failed to fetch game info: {}", game_response.status()).into());
+    }
+
+    let game: serde_json::Value = game_response.json().await?;
+    let game_title = game["title"].as_str().unwrap_or("Unknown").to_string();
+    let magnet_link = game["magnet_link"].as_str().unwrap_or("").to_string();
+
+    info!("Game: {}", game_title);
+    info!("Magnet/Link: {}", magnet_link);
+
+    // Step 2: Convert magnet link via Real-Debrid
+    let download_urls = if rd_enabled && !rd_api_key.is_empty() {
+        {
+            let mut status = state.status.write().await;
+            *status = format!("Converting link via Real-Debrid...");
+        }
+
+        show_notification(
+            "Processing Download",
+            &format!("Converting {} via Real-Debrid...", game_title)
+        );
+
+        let rd_client = realdebrid::RealDebridClient::new(rd_api_key);
+
+        if magnet_link.starts_with("magnet:") {
+            rd_client.convert_magnet(&magnet_link).await?
+        } else {
+            // It's a direct download link
+            vec![rd_client.unrestrict_link(&magnet_link).await?]
+        }
+    } else {
+        return Err("Real-Debrid is not configured. Please set your API key in the config.".into());
+    };
+
+    if download_urls.is_empty() {
+        return Err("No download URLs available".into());
+    }
+
+    info!("Got {} download URLs", download_urls.len());
+
+    // Step 3: Download files
+    show_notification(
+        "Download Started",
+        &format!("Downloading {} ({} files)...", game_title, download_urls.len())
+    );
+
+    let downloader = downloader::Downloader::new();
+    let game_folder = output_dir.join(&game_title);
+    tokio::fs::create_dir_all(&game_folder).await?;
+
+    for (i, url) in download_urls.iter().enumerate() {
+        // Extract filename from URL
+        let filename = url
+            .split('/')
+            .last()
+            .and_then(|s| s.split('?').next())
+            .unwrap_or(&format!("file_{}.bin", i))
+            .to_string();
+
+        let file_path = game_folder.join(&filename);
+
+        info!("Downloading {}/{}: {}", i + 1, download_urls.len(), filename);
+
+        {
+            let mut status = state.status.write().await;
+            *status = format!("Downloading {} ({}/{})", filename, i + 1, download_urls.len());
+        }
+
+        // Download with progress tracking
+        downloader.download_file(url, &file_path).await?;
+    }
+
+    // Step 4: Show completion notification
+    show_notification(
+        "Download Complete",
+        &format!("{} has been downloaded! Starting extraction...", game_title)
+    );
+
+    // Step 5: Extract archives
+    {
+        let mut status = state.status.write().await;
+        *status = format!("Extracting {}...", game_title);
+    }
+
+    // Find archives in the downloaded folder
+    let entries = tokio::fs::read_dir(&game_folder).await?;
+    let mut entries = entries;
+
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+
+        if path.is_file() {
+            let extension = path.extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase());
+
+            match extension.as_deref() {
+                Some("zip") => {
+                    info!("Extracting ZIP: {:?}", path);
+                    extract_zip(&path, &output_dir).await?;
+                }
+                Some("7z") => {
+                    info!("Extracting 7Z: {:?}", path);
+                    extract_7z(&path, &output_dir).await?;
+                }
+                _ => continue,
+            }
+        }
+    }
+
+    // Step 6: Show extraction complete
+    show_notification(
+        "Extraction Complete",
+        &format!("{} is ready! The installer will start automatically.", game_title)
+    );
+
+    {
+        let mut status = state.status.write().await;
+        *status = format!("✅ {} ready for installation", game_title);
+    }
+
+    Ok(())
 }
 
 /// Poll the server for new downloads in the queue (OLD ARCHITECTURE - to be removed)

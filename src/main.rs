@@ -228,6 +228,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/auth/me", get(auth_me))
         // Existing routes
         .route("/api/games", get(get_games))
+        .route("/api/games/:id", get(get_game_detail))
         .route("/api/games/genres", get(get_genres))
         .route("/api/games/random", get(get_random_game))
         .route("/api/games/favorites", get(get_favorites))
@@ -550,6 +551,22 @@ async fn get_games(
         per_page,
         total_pages,
     }))
+}
+
+// ─── Game Detail ───
+
+async fn get_game_detail(
+    State(state): State<AppState>,
+    Path(game_id): Path<i64>,
+) -> Result<Json<db::Game>, StatusCode> {
+    let game = db::get_game_by_id(&state.db, game_id)
+        .await
+        .map_err(|e| {
+            eprintln!("Error fetching game {}: {}", game_id, e);
+            StatusCode::NOT_FOUND
+        })?;
+
+    Ok(Json(game))
 }
 
 // ─── Genres ───
