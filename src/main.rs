@@ -15,11 +15,12 @@ mod system_info;
 use axum::{
     body::Body,
     extract::{Multipart, Path, Query, State},
-    http::{header, StatusCode},
+    http::{header, StatusCode, HeaderMap},
     response::{IntoResponse, Json, Response},
     routing::{delete, get, post},
     Router,
 };
+use axum::http::header::{COOKIE, SET_COOKIE};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -92,6 +93,35 @@ struct ApiResponse {
 #[derive(Serialize)]
 struct DownloadsResponse {
     downloads: Vec<download_manager::DownloadInfo>,
+}
+
+// ─── Authentication structures ───
+
+#[derive(Deserialize)]
+struct RegisterRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct LoginRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Serialize)]
+struct AuthResponse {
+    success: bool,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user: Option<UserInfo>,
+}
+
+#[derive(Serialize)]
+struct UserInfo {
+    id: i64,
+    username: String,
+    is_admin: bool,
 }
 
 #[tokio::main]
@@ -191,6 +221,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("📂 Frontend directory: {}", frontend_dir.display());
 
     let app = Router::new()
+        // Authentication routes
+        .route("/api/auth/register", post(auth_register))
+        .route("/api/auth/login", post(auth_login))
+        .route("/api/auth/logout", post(auth_logout))
+        .route("/api/auth/me", get(auth_me))
         // Existing routes
         .route("/api/games", get(get_games))
         .route("/api/games/genres", get(get_genres))
@@ -253,6 +288,242 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+// ─── Authentication endpoints ───
+
+async fn auth_register(
+    State(state): State<AppState>,
+    Json(req): Json<RegisterRequest>,
+) -> Result<(StatusCode, HeaderMap, Json<AuthResponse>), StatusCode> {
+    // Validate input
+    if req.username.trim().is_empty() || req.password.is_empty() {
+        return Ok((
+            StatusCode::BAD_REQUEST,
+            HeaderMap::new(),
+            Json(AuthResponse {
+                success: false,
+                message: "Username and password are required".to_string(),
+                user: None,
+            }),
+        ));
+    }
+
+    if req.username.len() < 3 {
+        return Ok((
+            StatusCode::BAD_REQUEST,
+            HeaderMap::new(),
+            Json(AuthResponse {
+                success: false,
+                message: "Username must be at least 3 characters".to_string(),
+                user: None,
+            }),
+        ));
+    }
+
+    if req.password.len() < 6 {
+        return Ok((
+            StatusCode::BAD_REQUEST,
+            HeaderMap::new(),
+            Json(AuthResponse {
+                success: false,
+                message: "Password must be at least 6 characters".to_string(),
+                user: None,
+            }),
+        ));
+    }
+
+    // Create user (is_admin = false for regular registration)
+    let user_id = match db::create_user(&state.db, &req.username, &req.password, false).await {
+        Ok(id) => id,
+        Err(e) => {
+            let msg = format!("{}", e);
+            if msg.contains("UNIQUE constraint failed") {
+                return Ok((
+                    StatusCode::CONFLICT,
+                    HeaderMap::new(),
+                    Json(AuthResponse {
+                        success: false,
+                        message: "Username already exists".to_string(),
+                        user: None,
+                    }),
+                ));
+            }
+            eprintln!("Error creating user: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Create session
+    let session_token = db::create_session(&state.db, user_id)
+        .await
+        .map_err(|e| {
+            eprintln!("Error creating session: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    // Set cookie
+    let mut headers = HeaderMap::new();
+    let cookie = format!(
+        "session={}; HttpOnly; Path=/; Max-Age=2592000; SameSite=Lax",
+        session_token
+    );
+    headers.insert(SET_COOKIE, cookie.parse().unwrap());
+
+    Ok((
+        StatusCode::CREATED,
+        headers,
+        Json(AuthResponse {
+            success: true,
+            message: "Account created successfully".to_string(),
+            user: Some(UserInfo {
+                id: user_id,
+                username: req.username,
+                is_admin: false,
+            }),
+        }),
+    ))
+}
+
+async fn auth_login(
+    State(state): State<AppState>,
+    Json(req): Json<LoginRequest>,
+) -> Result<(StatusCode, HeaderMap, Json<AuthResponse>), StatusCode> {
+    // Verify credentials
+    let user = match db::verify_user(&state.db, &req.username, &req.password).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Ok((
+                StatusCode::UNAUTHORIZED,
+                HeaderMap::new(),
+                Json(AuthResponse {
+                    success: false,
+                    message: "Invalid username or password".to_string(),
+                    user: None,
+                }),
+            ));
+        }
+        Err(e) => {
+            eprintln!("Error verifying user: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Create session
+    let session_token = db::create_session(&state.db, user.id)
+        .await
+        .map_err(|e| {
+            eprintln!("Error creating session: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    // Set cookie
+    let mut headers = HeaderMap::new();
+    let cookie = format!(
+        "session={}; HttpOnly; Path=/; Max-Age=2592000; SameSite=Lax",
+        session_token
+    );
+    headers.insert(SET_COOKIE, cookie.parse().unwrap());
+
+    Ok((
+        StatusCode::OK,
+        headers,
+        Json(AuthResponse {
+            success: true,
+            message: "Login successful".to_string(),
+            user: Some(UserInfo {
+                id: user.id,
+                username: user.username,
+                is_admin: user.is_admin,
+            }),
+        }),
+    ))
+}
+
+async fn auth_logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, HeaderMap, Json<AuthResponse>), StatusCode> {
+    // Extract session token from cookie
+    if let Some(session_token) = extract_session_token(&headers) {
+        // Delete session from database
+        let _ = db::delete_session(&state.db, &session_token).await;
+    }
+
+    // Clear cookie
+    let mut response_headers = HeaderMap::new();
+    let cookie = "session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax";
+    response_headers.insert(SET_COOKIE, cookie.parse().unwrap());
+
+    Ok((
+        StatusCode::OK,
+        response_headers,
+        Json(AuthResponse {
+            success: true,
+            message: "Logged out successfully".to_string(),
+            user: None,
+        }),
+    ))
+}
+
+async fn auth_me(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<AuthResponse>, StatusCode> {
+    // Extract session token from cookie
+    let session_token = match extract_session_token(&headers) {
+        Some(token) => token,
+        None => {
+            return Ok(Json(AuthResponse {
+                success: false,
+                message: "Not authenticated".to_string(),
+                user: None,
+            }));
+        }
+    };
+
+    // Get user from session
+    let user = match db::get_user_by_session(&state.db, &session_token).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Ok(Json(AuthResponse {
+                success: false,
+                message: "Invalid or expired session".to_string(),
+                user: None,
+            }));
+        }
+        Err(e) => {
+            eprintln!("Error getting user by session: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    Ok(Json(AuthResponse {
+        success: true,
+        message: "Authenticated".to_string(),
+        user: Some(UserInfo {
+            id: user.id,
+            username: user.username,
+            is_admin: user.is_admin,
+        }),
+    }))
+}
+
+// Helper function to extract session token from cookie header
+fn extract_session_token(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(COOKIE)?
+        .to_str()
+        .ok()?
+        .split(';')
+        .find_map(|cookie| {
+            let parts: Vec<&str> = cookie.trim().splitn(2, '=').collect();
+            if parts.len() == 2 && parts[0] == "session" {
+                Some(parts[1].to_string())
+            } else {
+                None
+            }
+        })
 }
 
 // ─── Game endpoints ───
