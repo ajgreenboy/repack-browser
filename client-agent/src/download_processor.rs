@@ -12,6 +12,20 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::time::{self, Duration};
 
+/// Sanitize filename for Windows by removing invalid characters
+fn sanitize_filename(filename: &str) -> String {
+    // Windows invalid characters: < > : " / \ | ? *
+    filename
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            _ => c,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 pub async fn poll_and_process_downloads(
     server_client: Arc<ServerClient>,
     client_id: &str,
@@ -66,6 +80,12 @@ async fn process_single_download(
     let download_id = download.id;
     let game_title = download.game_title.clone();
 
+    // Ensure output directory exists
+    if !output_dir.exists() {
+        std::fs::create_dir_all(output_dir)?;
+        info!("Created output directory: {:?}", output_dir);
+    }
+
     // Step 1: Download files
     info!("Starting download for: {}", game_title);
     report_progress(server_client, download_id, "downloading", 0.0, None, None, None).await?;
@@ -75,14 +95,18 @@ async fn process_single_download(
     for (idx, url) in download.direct_urls.iter().enumerate() {
         info!("Downloading file {}/{}", idx + 1, download.direct_urls.len());
 
-        // Extract filename from URL
+        // Extract filename from URL and sanitize it
         let default_name = format!("file_{}.bin", idx);
         let filename = url.split('/').last()
             .unwrap_or(&default_name)
             .split('?').next()
             .unwrap_or(&default_name);
 
-        let file_path = output_dir.join(filename);
+        // Sanitize filename for Windows (remove invalid characters)
+        let sanitized_filename = sanitize_filename(filename);
+
+        let file_path = output_dir.join(&sanitized_filename);
+        info!("Downloading to: {:?}", file_path);
 
         // Download file
         match downloader.download_file(url, &file_path).await {
