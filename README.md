@@ -4,9 +4,7 @@ A **self-hosted game repack browser** for households. Browse 7500+ games from mu
 
 > **⚠️ For Personal/Household Use Only**
 >
-> This application is designed for **home networks**. Each household member runs the Windows client on their own PC. Downloads happen locally, not on the server.
->
-> **Real-Debrid:** Each user needs their own Real-Debrid account. Sharing one account violates [Real-Debrid's TOS](https://real-debrid.com/terms).
+> This application is designed for **home networks**. Server admin sets up ONE Real-Debrid account. All household members share this account (allowed by RD for same IP address). Downloads happen on each user's own PC, not the server.
 
 ---
 
@@ -57,12 +55,12 @@ Client downloads to YOUR PC → Auto-extracts → Auto-installs → Reports prog
 - **Desktop notifications** - Get notified at every stage
 
 ### 🔧 Windows Client Features
-- **Local HTTP server** - Browser communicates with your local client
-- **Real-Debrid** - Each user uses their own RD account
-- **Download manager** - Handles multiple files with resume support
+- **Background polling** - Checks server for new downloads
+- **Download manager** - Downloads files to your local PC
 - **Auto-extractor** - Extracts archives to your games folder
 - **Silent installer** - Runs FitGirl setups with `/VERYSILENT /LANG=english`
 - **Notifications** - Windows popups for download/extract/install status
+- **Progress reporting** - Sends real-time updates back to server
 
 ---
 
@@ -90,8 +88,15 @@ docker compose up -d
 
 **Initial setup:**
 1. Log in and go to Settings
-2. (Optional) Add RAWG API key for game metadata
-3. Click "Scrape" to populate the database (~5 minutes)
+2. **REQUIRED:** Add Real-Debrid API key (get from https://real-debrid.com/apitoken)
+3. (Optional) Add RAWG API key for game metadata
+4. Click "Scrape" to populate the database (~5 minutes)
+
+**Real-Debrid Setup (Required):**
+- Server admin gets ONE Real-Debrid account for the household
+- Go to https://real-debrid.com/apitoken and copy your API key
+- Add it to server settings or set `RD_API_KEY` environment variable
+- All household members will share this account
 
 ---
 
@@ -116,10 +121,6 @@ cargo build --release --target x86_64-pc-windows-gnu
 url = "http://your-server-ip:3030"
 enabled = true
 
-[realdebrid]
-api_key = "YOUR_REAL_DEBRID_API_KEY"  # Get from https://real-debrid.com/apitoken
-enabled = true
-
 [extraction]
 output_dir = "C:\\Games"
 delete_after_extract = false
@@ -128,10 +129,7 @@ delete_after_extract = false
 3. **Restart** the client
 4. **Keep it running** - Minimize to system tray
 
-#### Get Real-Debrid API Key
-1. Go to https://real-debrid.com/apitoken
-2. Copy your API key
-3. Paste into `config.toml`
+**Note:** Client does NOT need Real-Debrid configuration. Server handles all RD operations.
 
 ---
 
@@ -158,9 +156,9 @@ delete_after_extract = false
 - Client must be on the same PC as your browser
 
 **Error: "Real-Debrid is not configured"**
-- Add your RD API key to `config.toml`
-- Set `enabled = true`
-- Restart the client
+- Server admin needs to configure RD API key on the server
+- Add RD_API_KEY environment variable or configure in server settings
+- Check server logs to verify RD is working
 
 ---
 
@@ -180,16 +178,16 @@ delete_after_extract = false
 
 ### Windows Client (Per PC)
 **Responsibilities:**
-- Run HTTP server on `localhost:9999` for browser commands
-- Download files to local disk via Real-Debrid
+- Poll server for pending downloads (every 30 seconds)
+- Download files to local disk using direct URLs from server
 - Extract archives locally
 - Install games silently
-- Report progress to server
+- Report progress back to server
 
 **Each client:**
-- Uses its own Real-Debrid account
-- Downloads to its own PC
+- Downloads to its own PC (not the server)
 - Has its own output directory
+- Links to user account for tracking downloads
 
 ---
 
@@ -201,8 +199,11 @@ delete_after_extract = false
 # Database
 DATABASE_PATH=sqlite:/app/data/games.db?mode=rwc
 
+# REQUIRED: Real-Debrid API key (one for entire household)
+RD_API_KEY=your_real_debrid_key_here
+
 # Optional: RAWG API for game metadata
-RAWG_API_KEY=your_key_here
+RAWG_API_KEY=your_rawg_key_here
 
 # Port (default: 3000)
 PORT=3000
@@ -220,11 +221,7 @@ name = "Your-PC-Name"
 [server]
 url = "http://homelab:3030"
 enabled = true
-poll_interval_secs = 30
-
-[realdebrid]
-api_key = "YOUR_KEY_HERE"  # Required!
-enabled = true
+poll_interval_secs = 30  # Check for new downloads every 30 seconds
 
 [extraction]
 output_dir = "C:\\Games"
@@ -236,6 +233,8 @@ verify_md5 = true
 report_interval_secs = 2
 track_ram_usage = true
 ```
+
+**Note:** Real-Debrid configuration is NOT needed in client config. Server handles all RD operations.
 
 ---
 
@@ -254,9 +253,10 @@ track_ram_usage = true
 - 30-day session expiry
 
 ### Real-Debrid
-- Each user should have their own RD account
-- Don't share accounts (violates RD TOS)
-- API keys stored locally in client config
+- Server admin sets up ONE RD account for the household
+- All users on same IP address can share one RD account (per RD TOS)
+- API key stored securely on server (not on clients)
+- Never expose RD_API_KEY environment variable publicly
 
 ---
 
@@ -302,9 +302,10 @@ docker compose restart
 - Firewall might be blocking port 9999
 
 **Downloads fail:**
-- Verify Real-Debrid API key is correct
-- Check RD account is active
-- Ensure enough disk space
+- Verify server has valid Real-Debrid API key configured
+- Check server logs for RD errors
+- Ensure client has enough disk space
+- Check client is polling server successfully
 
 **Extraction fails:**
 - Check write permissions on output directory
@@ -323,18 +324,19 @@ docker compose restart
 ### Setup for Each Person
 
 1. **Install client** on your PC
-2. **Configure** with your own Real-Debrid account
+2. **Configure** server URL in client config
 3. **Create account** on the website
-4. **Keep client running** while browsing
+4. **Keep client running** in background
 
 ### What's Shared
 - Game catalog (everyone sees same games)
 - Server resources (bandwidth, storage)
+- **Real-Debrid account** (one account for entire household)
 
 ### What's Private
-- Your downloads (only you see them)
+- Your downloads (only you see your own)
 - Your favorites
-- Your Real-Debrid account
+- Your download/install history
 
 ---
 
@@ -394,7 +396,7 @@ This application does not:
 - Distribute game files
 - Provide pirated material
 
-It simply provides a browser interface for publicly available information and connects to your existing Real-Debrid account.
+It simply provides a browser interface for publicly available information. Server admin connects their Real-Debrid account for download functionality.
 
 ### Credits
 - Game data from [FitGirl Repacks](https://fitgirl-repacks.site) and [SteamRIP](https://steamrip.com)
@@ -420,13 +422,14 @@ MIT License - See LICENSE file
 **Release Date:** February 2026
 **Architecture:** Client-side downloads (v2.0 refactor)
 
-### Recent Changes
+### Recent Changes (v2.0)
 - ✅ Refactored to client-download architecture
-- ✅ Each user downloads to their own PC
-- ✅ Real-Debrid integration per client
-- ✅ Silent FitGirl installations
-- ✅ Desktop notifications
-- ✅ Multi-user authentication
+- ✅ Server uses ONE Real-Debrid account for entire household
+- ✅ Each user downloads to their own PC (not server)
+- ✅ Client polls server for pending downloads
+- ✅ Real-time progress reporting from clients
+- ✅ Silent FitGirl installations with desktop notifications
+- ✅ Multi-user authentication with per-user download tracking
 
 ### Known Issues
 See [ARCHITECTURE_ISSUES.md](ARCHITECTURE_ISSUES.md) for technical details about ongoing refactoring work.
