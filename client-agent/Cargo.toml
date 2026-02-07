@@ -1,0 +1,68 @@
+[package]
+name = "fitgirl-client"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+# Core async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client for server communication
+reqwest = { version = "0.11", features = ["json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# UUID for client ID
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# System information
+sysinfo = "0.30"
+
+# Archive extraction
+zip = "0.6"
+sevenz-rust = "0.5"
+
+# File operations
+walkdir = "2.4"
+
+# Progress tracking
+indicatif = "0.17"
+
+# MD5 hashing
+md5 = "0.7"
+
+# Windows-specific
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = [
+    "winuser", "wincon", "shellapi", "processthreadsapi",
+    "sysinfoapi", "memoryapi", "fileapi", "winbase"
+] }
+
+# System tray
+tray-item = "0.10"
+
+# Configuration file
+toml = "0.8"
+
+# Logging
+env_logger = "0.11"
+log = "0.4"
+
+# Date/time
+chrono = "0.4"
+
+# Hostname and directories
+hostname = "0.3"
+dirs = "5.0"
+
+[[bin]]
+name = "fitgirl-client"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Link-time optimization
+codegen-units = 1   # Better optimization
+strip = true        # Strip symbols
