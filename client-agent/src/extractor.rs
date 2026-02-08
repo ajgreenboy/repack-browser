@@ -139,6 +139,54 @@ impl Extractor {
         Ok(())
     }
 
+    pub async fn extract_rar(
+        &self,
+        archive_path: &Path,
+        output_dir: &Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Use 7-Zip command line for RAR extraction (7z.exe can extract RAR files)
+        // Try multiple common 7-Zip installation paths
+        let seven_zip_paths = vec![
+            r"C:\Program Files\7-Zip\7z.exe",
+            r"C:\Program Files (x86)\7-Zip\7z.exe",
+            "7z.exe", // In PATH
+        ];
+
+        let mut seven_zip_exe = None;
+        for path in &seven_zip_paths {
+            if std::path::Path::new(path).exists() || path == &"7z.exe" {
+                seven_zip_exe = Some(path);
+                break;
+            }
+        }
+
+        let seven_zip_exe = seven_zip_exe
+            .ok_or("7-Zip not found. Please install 7-Zip from https://www.7-zip.org/")?;
+
+        // Run 7z.exe x <archive> -o<output_dir> -y
+        let output = tokio::process::Command::new(seven_zip_exe)
+            .arg("x")  // Extract with full paths
+            .arg(archive_path)
+            .arg(format!("-o{}", output_dir.display()))
+            .arg("-y")  // Yes to all prompts
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run 7-Zip: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("7-Zip extraction failed: {}", stderr).into());
+        }
+
+        {
+            let mut prog = self.progress.write().await;
+            prog.status = ExtractionStatus::Completed;
+            prog.progress_percent = 100.0;
+        }
+
+        Ok(())
+    }
+
     pub async fn extract(
         &self,
         archive_path: &Path,
@@ -155,6 +203,7 @@ impl Extractor {
         match extension.as_str() {
             "zip" => self.extract_zip(archive_path, output_dir).await,
             "7z" => self.extract_7z(archive_path, output_dir).await,
+            "rar" => self.extract_rar(archive_path, output_dir).await,
             _ => Err(format!("Unsupported archive format: {}", extension).into()),
         }
     }
@@ -227,5 +276,14 @@ pub async fn extract_7z(
 ) -> Result<(), String> {
     let extractor = Extractor::new(archive_path.to_string_lossy().to_string());
     extractor.extract_7z(archive_path, output_dir).await
+        .map_err(|e| e.to_string())
+}
+
+pub async fn extract_rar(
+    archive_path: &Path,
+    output_dir: &Path,
+) -> Result<(), String> {
+    let extractor = Extractor::new(archive_path.to_string_lossy().to_string());
+    extractor.extract_rar(archive_path, output_dir).await
         .map_err(|e| e.to_string())
 }

@@ -179,13 +179,14 @@ async fn process_single_download(
         if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
             let ext_lower = ext.to_lowercase();
 
-            if ext_lower == "zip" || ext_lower == "7z" {
+            if ext_lower == "zip" || ext_lower == "7z" || ext_lower == "rar" {
                 info!("Extracting: {:?}", file_path);
 
-                let extract_result = if ext_lower == "zip" {
-                    crate::extractor::extract_zip(file_path, &extract_dir).await
-                } else {
-                    crate::extractor::extract_7z(file_path, &extract_dir).await
+                let extract_result = match ext_lower.as_str() {
+                    "zip" => crate::extractor::extract_zip(file_path, &extract_dir).await,
+                    "7z" => crate::extractor::extract_7z(file_path, &extract_dir).await,
+                    "rar" => crate::extractor::extract_rar(file_path, &extract_dir).await,
+                    _ => unreachable!(),
                 };
 
                 match extract_result {
