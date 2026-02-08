@@ -77,8 +77,8 @@ pub async fn poll_and_process_downloads(
 }
 
 async fn process_single_download(
-    server_client: &ServerClient,
-    downloader: &Downloader,
+    server_client: &Arc<ServerClient>,
+    downloader: &Arc<Downloader>,
     download: crate::server_client::DownloadQueueItem,
     output_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -96,9 +96,10 @@ async fn process_single_download(
     report_progress(server_client, download_id, "downloading", 0.0, None, None, None).await?;
 
     let mut downloaded_files = Vec::new();
+    let total_files = download.direct_urls.len();
 
     for (idx, url) in download.direct_urls.iter().enumerate() {
-        info!("Downloading file {}/{}", idx + 1, download.direct_urls.len());
+        info!("Downloading file {}/{}", idx + 1, total_files);
 
         // Extract filename from URL and sanitize it
         let default_name = format!("file_{}.bin", idx);
@@ -125,13 +126,61 @@ async fn process_single_download(
                 tokio::time::sleep(Duration::from_secs(delay_secs)).await;
             }
 
+            // Clone references for progress monitoring task
+            let downloader_clone = Arc::clone(downloader);
+            let server_client_clone = Arc::clone(server_client);
+            let current_idx = idx;
+
+            // Spawn a task to report progress during download
+            let progress_task = tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(2));
+                loop {
+                    interval.tick().await;
+                    if let Some(dl_progress) = downloader_clone.get_progress().await {
+                        let speed_str = if dl_progress.speed_bytes_per_sec > 0.0 {
+                            Some(crate::downloader::format_speed(dl_progress.speed_bytes_per_sec))
+                        } else {
+                            None
+                        };
+
+                        let eta_str = if dl_progress.eta_seconds > 0 {
+                            Some(crate::downloader::format_eta(dl_progress.eta_seconds))
+                        } else {
+                            None
+                        };
+
+                        let file_progress = if dl_progress.total_bytes > 0 {
+                            (dl_progress.downloaded_bytes as f64 / dl_progress.total_bytes as f64) * 100.0
+                        } else {
+                            0.0
+                        };
+
+                        // Overall progress across all files
+                        let overall_progress = ((current_idx as f64 + (file_progress / 100.0)) / total_files as f64) * 100.0;
+
+                        let _ = report_progress(
+                            &server_client_clone,
+                            download_id,
+                            "downloading",
+                            overall_progress,
+                            speed_str,
+                            eta_str,
+                            None,
+                        ).await;
+                    }
+                }
+            });
+
             match downloader.download_file(url, &file_path).await {
                 Ok(_) => {
+                    // Stop progress reporting task
+                    progress_task.abort();
+
                     info!("Downloaded: {}", filename);
                     downloaded_files.push(file_path.clone());
 
-                    // Update progress
-                    let progress = ((idx + 1) as f64 / download.direct_urls.len() as f64) * 100.0;
+                    // Update progress - file complete
+                    let progress = ((idx + 1) as f64 / total_files as f64) * 100.0;
                     report_progress(
                         server_client,
                         download_id,
@@ -145,6 +194,9 @@ async fn process_single_download(
                     break;
                 }
                 Err(e) => {
+                    // Stop progress reporting task
+                    progress_task.abort();
+
                     last_error = format!("{}", e);
                     error!("Download attempt {} failed for {}: {}", attempt + 1, filename, e);
                 }
