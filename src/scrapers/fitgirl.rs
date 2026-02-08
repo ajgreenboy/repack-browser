@@ -201,6 +201,50 @@ impl GameScraper for FitGirlScraper {
     fn source_label(&self) -> &'static str {
         "FitGirl Repacks"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl FitGirlScraper {
+    /// Scrape FitGirl's top repacks pages (top_50, top_150, etc.)
+    /// Returns a list of (title, rank) tuples
+    pub async fn scrape_top_repacks(
+        &self,
+        category: &str,
+    ) -> Result<Vec<(String, i64)>, Box<dyn std::error::Error + Send + Sync>> {
+        let url = match category {
+            "top_50" => "https://fitgirl-repacks.site/top-50-repacks/",
+            "top_150" => "https://fitgirl-repacks.site/top-150-repacks/",
+            _ => return Err(format!("Unknown category: {}", category).into()),
+        };
+
+        println!("Scraping {} from {}...", category, url);
+
+        let response = self.client.get(url).send().await?;
+        let html = response.text().await?;
+
+        // Extract game titles from the ordered list
+        // Pattern: <li><a href="...">Title</a></li> or <li>Title</li>
+        let li_re = Regex::new(r#"<li[^>]*>(?:<a[^>]*>)?([^<]+?)(?:</a>)?</li>"#)?;
+        let mut results = Vec::new();
+
+        for (rank, cap) in li_re.captures_iter(&html).enumerate() {
+            if let Some(title_match) = cap.get(1) {
+                let raw_title = title_match.as_str();
+                let title = utils::html_to_text(raw_title);
+
+                // Skip empty titles or navigation items
+                if !title.is_empty() && !title.contains("http") && title.len() > 3 {
+                    results.push((title, (rank + 1) as i64));
+                }
+            }
+        }
+
+        println!("  Found {} titles for {}", results.len(), category);
+        Ok(results)
+    }
 }
 
 // ─── Post parsing ───

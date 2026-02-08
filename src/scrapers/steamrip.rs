@@ -235,6 +235,10 @@ impl GameScraper for SteamRipScraper {
     fn source_label(&self) -> &'static str {
         "SteamRIP"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 // ─── Post parsing ───

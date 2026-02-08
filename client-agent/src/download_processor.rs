@@ -12,10 +12,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::time::{self, Duration};
 
-/// Sanitize filename for Windows by removing invalid characters
+/// URL-decode and sanitize filename for Windows
 fn sanitize_filename(filename: &str) -> String {
-    // Windows invalid characters: < > : " / \ | ? *
-    filename
+    // First, URL-decode the filename to handle %20, %28, etc.
+    let decoded = urlencoding::decode(filename)
+        .unwrap_or(std::borrow::Cow::Borrowed(filename))
+        .to_string();
+
+    // Then replace Windows invalid characters: < > : " / \ | ? *
+    decoded
         .chars()
         .map(|c| match c {
             '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
@@ -164,8 +169,11 @@ async fn process_single_download(
     info!("Download complete. Starting extraction for: {}", game_title);
     report_progress(server_client, download_id, "extracting", 0.0, None, None, None).await?;
 
-    let extract_dir = output_dir.join(&game_title);
+    // Sanitize the game title for use as a directory name
+    let sanitized_game_title = sanitize_filename(&game_title);
+    let extract_dir = output_dir.join(&sanitized_game_title);
     std::fs::create_dir_all(&extract_dir)?;
+    info!("Extracting to directory: {:?}", extract_dir);
 
     for file_path in &downloaded_files {
         if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {

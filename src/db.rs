@@ -56,6 +56,7 @@ pub struct GameQuery {
     pub source: Option<String>,  // Filter by source
     pub page: Option<i64>,
     pub per_page: Option<i64>,
+    pub ids: Option<String>,  // Comma-separated game IDs for batch fetching
 }
 
 /// Initialize the database connection pool and run migrations.
@@ -391,6 +392,26 @@ pub async fn init_db(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
         .execute(&pool)
         .await?;
 
+    // Game categories table for carousel (top 50, top 150, etc.)
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS game_categories (
+            game_id INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            rank INTEGER,
+            scraped_at TEXT NOT NULL,
+            PRIMARY KEY (game_id, category),
+            FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_game_categories_category ON game_categories(category, rank)")
+        .execute(&pool)
+        .await?;
+
     // Notifications table
     sqlx::query(
         r#"
@@ -509,6 +530,33 @@ pub async fn query_games(
     pool: &SqlitePool,
     query: GameQuery,
 ) -> Result<(Vec<Game>, i64), sqlx::Error> {
+    // Handle batch fetch by IDs
+    if let Some(ref ids_str) = query.ids {
+        let ids: Vec<i64> = ids_str
+            .split(',')
+            .filter_map(|s| s.trim().parse::<i64>().ok())
+            .collect();
+
+        if ids.is_empty() {
+            return Ok((Vec::new(), 0));
+        }
+
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT id, title, source, file_size, magnet_link, genres, company, original_size, thumbnail_url, screenshots, source_url, post_date, search_title FROM games WHERE id IN ({})",
+            placeholders
+        );
+
+        let mut query_builder = sqlx::query_as::<_, Game>(&sql);
+        for id in &ids {
+            query_builder = query_builder.bind(id);
+        }
+
+        let games = query_builder.fetch_all(pool).await?;
+        let count = games.len() as i64;
+        return Ok((games, count));
+    }
+
     let per_page = query.per_page.unwrap_or(50);
     let page = query.page.unwrap_or(1);
     let offset = (page - 1) * per_page;
@@ -1863,6 +1911,64 @@ pub async fn mark_all_notifications_read(
     .bind(user_id)
     .execute(pool)
     .await?;
+
+    Ok(())
+}
+
+// ─── Game Categories ───
+
+/// Insert or update a game category (for carousel: top_50, top_150, etc.)
+pub async fn upsert_game_category(
+    pool: &SqlitePool,
+    game_id: i64,
+    category: &str,
+    rank: i64,
+) -> Result<(), sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    sqlx::query(
+        "INSERT INTO game_categories (game_id, category, rank, scraped_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(game_id, category) DO UPDATE SET rank = excluded.rank, scraped_at = excluded.scraped_at"
+    )
+    .bind(game_id)
+    .bind(category)
+    .bind(rank)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Get games by category (ordered by rank)
+pub async fn get_games_by_category(
+    pool: &SqlitePool,
+    category: &str,
+    limit: i64,
+) -> Result<Vec<Game>, sqlx::Error> {
+    sqlx::query_as::<_, Game>(
+        "SELECT g.id, g.title, g.source, g.file_size, g.magnet_link, g.genres, g.company, g.original_size, g.thumbnail_url, g.screenshots, g.source_url, g.post_date, g.search_title
+         FROM games g
+         JOIN game_categories gc ON gc.game_id = g.id
+         WHERE gc.category = ?
+         ORDER BY gc.rank ASC
+         LIMIT ?"
+    )
+    .bind(category)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
+/// Clear all entries for a specific category
+pub async fn clear_category(
+    pool: &SqlitePool,
+    category: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM game_categories WHERE category = ?")
+        .bind(category)
+        .execute(pool)
+        .await?;
 
     Ok(())
 }

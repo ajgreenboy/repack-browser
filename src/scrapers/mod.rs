@@ -82,4 +82,7 @@ pub trait GameScraper: Send + Sync {
 
     /// Get the human-readable source label (e.g., "FitGirl Repacks", "SteamRIP")
     fn source_label(&self) -> &'static str;
+
+    /// Allow downcasting to concrete types
+    fn as_any(&self) -> &dyn std::any::Any;
 }

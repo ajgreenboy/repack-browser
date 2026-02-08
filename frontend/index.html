@@ -7,8 +7,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-deepest: #06080c; --bg-deep: #0c1018; --bg-card: #111827; --bg-card-hover: #1a2236;
-            --bg-surface: #151d2e; --bg-input: #0f1520; --border: #1e293b; --border-hover: #334155;
+            --bg-deepest: #0a0a0a; --bg-deep: #0f0f0f; --bg-card: #141414; --bg-card-hover: #1a1a1a;
+            --bg-surface: #1c1c1c; --bg-input: #121212; --border: #2a2a2a; --border-hover: #3a3a3a;
             --accent: #3b82f6; --accent-glow: rgba(59,130,246,0.15); --accent-bright: #60a5fa; --accent-hover: #2563eb;
             --text: #e2e8f0; --text-muted: #94a3b8; --text-dim: #64748b;
             --gold: #f59e0b; --gold-dim: rgba(245,158,11,0.12); --yellow-bg: rgba(245,158,11,0.15);
@@ -22,34 +22,23 @@
 
         .hidden{display:none!important}
 
-        /* ── Featured Carousel ── */
+        /* ── Featured Carousel Grid ── */
         .featured-carousel{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:2rem}
         .carousel-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--bg-surface);padding:0.5rem}
         .carousel-tab{padding:0.5rem 1rem;border-radius:8px;background:transparent;border:none;color:var(--text-muted);font-family:inherit;font-size:0.825rem;font-weight:600;cursor:pointer;transition:all 0.2s}
         .carousel-tab:hover{background:var(--bg-card);color:var(--text)}
         .carousel-tab.active{background:var(--accent);color:#fff}
-        .carousel-main{position:relative;aspect-ratio:21/9;background:var(--bg-deep);overflow:hidden;cursor:pointer}
-        .carousel-main img{width:100%;height:100%;object-fit:cover;display:block}
-        .carousel-info{position:absolute;bottom:0;left:0;right:0;padding:2rem;background:linear-gradient(180deg,transparent 0%,rgba(0,0,0,0.85) 100%);color:#fff}
-        .carousel-title{font-size:1.75rem;font-weight:700;margin-bottom:0.5rem}
-        .carousel-meta{display:flex;gap:1rem;font-size:0.875rem;color:rgba(255,255,255,0.7);margin-bottom:0.75rem}
-        .carousel-genres{display:flex;flex-wrap:wrap;gap:0.375rem;margin-bottom:1rem}
-        .carousel-genre-tag{font-size:0.7rem;font-weight:500;padding:0.25rem 0.6rem;border-radius:999px;background:rgba(59,130,246,0.25);color:#93c5fd;backdrop-filter:blur(4px)}
-        .carousel-actions{display:flex;gap:0.5rem}
-        .carousel-btn{padding:0.6rem 1.25rem;border-radius:8px;border:none;font-family:inherit;font-size:0.85rem;font-weight:600;cursor:pointer;transition:all 0.2s}
-        .carousel-btn-primary{background:var(--accent);color:#fff}
-        .carousel-btn-primary:hover{background:var(--accent-hover)}
-        .carousel-btn-secondary{background:rgba(255,255,255,0.15);color:#fff;backdrop-filter:blur(4px)}
-        .carousel-btn-secondary:hover{background:rgba(255,255,255,0.25)}
-        .carousel-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);color:#fff;border:none;border-radius:50%;width:3rem;height:3rem;cursor:pointer;font-size:1.5rem;display:flex;align-items:center;justify-content:center;transition:all 0.2s;z-index:2}
-        .carousel-nav:hover{background:rgba(0,0,0,0.7);transform:translateY(-50%) scale(1.1)}
-        .carousel-nav-prev{left:1rem}
-        .carousel-nav-next{right:1rem}
-        .carousel-thumbs{display:flex;gap:0.5rem;padding:1rem;overflow-x:auto;scrollbar-width:thin}
-        .carousel-thumb{flex-shrink:0;width:120px;height:68px;border-radius:8px;overflow:hidden;cursor:pointer;border:2px solid transparent;transition:all 0.2s;opacity:0.6}
-        .carousel-thumb:hover{opacity:1;border-color:var(--accent)}
-        .carousel-thumb.active{opacity:1;border-color:var(--accent)}
-        .carousel-thumb img{width:100%;height:100%;object-fit:cover}
+        .carousel-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0.875rem;padding:1rem}
+        .carousel-card{position:relative;aspect-ratio:16/9;background:var(--bg-deep);border-radius:10px;overflow:hidden;cursor:pointer;transition:all 0.2s;border:1px solid var(--border)}
+        .carousel-card:hover{border-color:var(--accent);transform:translateY(-4px);box-shadow:0 8px 24px rgba(0,0,0,0.4)}
+        .carousel-card-thumb{position:relative;width:100%;height:100%}
+        .carousel-card-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+        .carousel-card-rank{position:absolute;top:0.5rem;left:0.5rem;background:rgba(0,0,0,0.75);backdrop-filter:blur(8px);color:#fff;font-size:0.75rem;font-weight:700;padding:0.25rem 0.5rem;border-radius:6px;font-family:'JetBrains Mono',monospace}
+        .carousel-card-body{position:absolute;bottom:0;left:0;right:0;padding:0.875rem;background:linear-gradient(180deg,transparent 0%,rgba(0,0,0,0.9) 100%);color:#fff}
+        .carousel-card-title{font-size:0.825rem;font-weight:600;line-height:1.3;margin-bottom:0.25rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+        .carousel-card-size{font-size:0.7rem;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono',monospace}
+        @media(max-width:1024px){.carousel-grid{grid-template-columns:repeat(2,1fr)}}
+        @media(max-width:768px){.carousel-grid{grid-template-columns:1fr}}
 
         /* ── Right Sidebar ── */
         .right-sidebar{position:fixed;right:0;top:60px;bottom:0;width:280px;background:var(--bg-card);border-left:1px solid var(--border);padding:1.25rem;overflow-y:auto;z-index:50;transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1)}
@@ -221,8 +210,62 @@
         .screenshot-thumb.border-blue-500{border-color:var(--accent)!important}
         .screenshot-thumb.border-transparent{border-color:transparent!important}
 
+        /* ── Library View ── */
+        .library-tab:hover{background:rgba(59,130,246,0.1);color:var(--text)}
+        .library-tab.active{background:var(--accent);color:#fff}
+
+        /* ── View Toggle ── */
+        .view-toggle{display:flex;gap:0.25rem;background:var(--bg-surface);border-radius:8px;padding:0.25rem;flex-shrink:0}
+        .view-toggle-btn{background:transparent;color:var(--text-muted);border:none;padding:0.4rem 0.75rem;border-radius:6px;font-family:inherit;font-size:0.825rem;font-weight:600;cursor:pointer;transition:all 0.2s;white-space:nowrap}
+        .view-toggle-btn:hover{background:rgba(59,130,246,0.1);color:var(--text)}
+        .view-toggle-btn.active{background:var(--accent);color:#fff}
+
+        /* ── List View ── */
+        .view-mode-list .game-grid{display:flex;flex-direction:column;gap:0.875rem}
+        .view-mode-list .game-card{display:flex;flex-direction:row;border-radius:12px;overflow:visible;max-width:100%}
+        .view-mode-list .game-thumb{aspect-ratio:16/9;width:140px;flex-shrink:0;border-radius:10px 0 0 10px}
+        .view-mode-list .game-thumb .fav-star{display:none}
+        .view-mode-list .card-body{flex:1;display:flex;align-items:center;gap:1rem;padding:1rem}
+        .view-mode-list .card-info{flex:1;min-width:0}
+        .view-mode-list .card-header{margin-bottom:0.25rem}
+        .view-mode-list .card-title{font-size:0.925rem;-webkit-line-clamp:1}
+        .view-mode-list .card-genres{margin-bottom:0}
+        .view-mode-list .card-actions{display:flex!important;align-items:center;gap:0.5rem;flex-shrink:0}
+        .view-mode-list .card-actions .fav-star{position:static;width:36px;height:36px;border-radius:10px}
+        .view-mode-list .source-badge{position:absolute;top:6px;left:6px}
+        .view-mode-list .game-card:hover{transform:translateX(4px)}
+
+        /* ── Left Sidebar ── */
+        .left-sidebar{position:fixed;left:0;top:0;bottom:0;width:245px;background:var(--bg-card);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:100;padding:1rem 0;overflow-y:auto}
+        .sidebar-header{padding:0 1.25rem 1.25rem;border-bottom:1px solid var(--border)}
+        .sidebar-logo{font-size:0.9rem;font-weight:700;color:var(--text);display:flex;align-items:center;gap:0.5rem}
+        .sidebar-nav{display:flex;flex-direction:column;padding:1rem 0.75rem;gap:0.25rem;flex:1}
+        .sidebar-nav-item{display:flex;align-items:center;gap:0.75rem;padding:0.625rem 0.875rem;border-radius:10px;background:transparent;border:none;color:var(--text-muted);font-family:inherit;font-size:0.85rem;font-weight:500;cursor:pointer;transition:all 0.2s;text-align:left;width:100%}
+        .sidebar-nav-item:hover{background:var(--bg-surface);color:var(--text)}
+        .sidebar-nav-item.active{background:var(--accent);color:#fff}
+        .sidebar-nav-item .nav-icon{font-size:1.1rem;flex-shrink:0}
+        .sidebar-nav-item .nav-label{flex:1}
+        .sidebar-section{padding:0 1.25rem;margin-top:auto;border-top:1px solid var(--border);padding-top:1rem}
+        .sidebar-section-title{font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-dim);margin-bottom:0.75rem}
+        .source-toggle-vertical{display:flex;flex-direction:column;gap:0.25rem}
+        .source-toggle-vertical .source-toggle-btn{background:transparent;color:var(--text-muted);border:1px solid var(--border);padding:0.5rem 0.75rem;border-radius:8px;font-family:inherit;font-size:0.825rem;font-weight:600;cursor:pointer;transition:all 0.2s;text-align:center}
+        .source-toggle-vertical .source-toggle-btn:hover{background:rgba(59,130,246,0.1);color:var(--text);border-color:var(--border-hover)}
+        .source-toggle-vertical .source-toggle-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+        /* Adjust content and topbar for sidebar */
+        .topbar,.content,.scrape-progress,.error-banner{margin-left:245px}
+        .topbar .source-toggle{display:none} /* Hide topbar source toggle */
+        .topbar-nav{display:none} /* Hide topbar nav buttons */
+
         @media(max-width:768px){
-            .topbar{padding:0 1rem;gap:0.25rem} .content{padding:1rem} .scrape-progress,.error-banner{margin:0.5rem 1rem 0}
+            .left-sidebar{width:60px}
+            .sidebar-logo,.nav-label,.sidebar-section-title{display:none}
+            .sidebar-nav{padding:1rem 0.5rem}
+            .sidebar-nav-item{justify-content:center;padding:0.75rem}
+            .sidebar-section{padding:0.5rem}
+            .source-toggle-vertical .source-toggle-btn{padding:0.625rem;font-size:0.75rem}
+            .topbar,.content,.scrape-progress,.error-banner{margin-left:60px}
+            .topbar{padding:0 1rem;gap:0.25rem} .content{padding:1rem}
             .filter-bar{gap:0.5rem} .filter-input{min-width:100%} .game-grid{grid-template-columns:repeat(2,1fr);gap:0.625rem}
             .scrape-stats{grid-template-columns:repeat(2,1fr)} .topbar-logo-text{display:none}
             .right-sidebar{width:100%;top:60px} .sidebar-toggle{bottom:4rem}
@@ -230,24 +273,53 @@
     </style>
 </head>
 <body>
-    <header class="topbar">
-        <div class="topbar-logo">
-            <div class="source-toggle">
-                <button class="source-toggle-btn active" data-source="all" onclick="setSource('all')">All</button>
-                <button class="source-toggle-btn" data-source="fitgirl" onclick="setSource('fitgirl')">FitGirl</button>
-                <button class="source-toggle-btn" data-source="steamrip" onclick="setSource('steamrip')">SteamRIP</button>
+    <!-- Left Sidebar -->
+    <aside class="left-sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">📚 Repack Browser</div>
+        </div>
+        <nav class="sidebar-nav">
+            <button id="sidebarHome" onclick="showView('home')" class="sidebar-nav-item">
+                <span class="nav-icon">🏠</span>
+                <span class="nav-label">Home</span>
+            </button>
+            <button id="sidebarGames" onclick="showView('games')" class="sidebar-nav-item active">
+                <span class="nav-icon">📚</span>
+                <span class="nav-label">Catalogue</span>
+            </button>
+            <button id="sidebarLibrary" onclick="showView('library')" class="sidebar-nav-item">
+                <span class="nav-icon">⭐</span>
+                <span class="nav-label">Library</span>
+            </button>
+            <button id="sidebarDownloads" onclick="showView('downloads')" class="sidebar-nav-item">
+                <span class="nav-icon">⬇️</span>
+                <span class="nav-label">Downloads</span>
+                <span id="sidebarDownloadBadge" class="download-badge hidden" style="position:static;margin-left:auto;">0</span>
+            </button>
+            <button id="sidebarClients" onclick="showView('clients')" class="sidebar-nav-item">
+                <span class="nav-icon">💻</span>
+                <span class="nav-label">Clients</span>
+            </button>
+            <button id="sidebarSystemHealth" onclick="showView('systemHealth')" class="sidebar-nav-item">
+                <span class="nav-icon">🏥</span>
+                <span class="nav-label">Health</span>
+            </button>
+            <button id="sidebarSettings" onclick="showSettingsModal()" class="sidebar-nav-item">
+                <span class="nav-icon">⚙️</span>
+                <span class="nav-label">Settings</span>
+            </button>
+        </nav>
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">SOURCES</div>
+            <div class="source-toggle-vertical">
+                <button onclick="setSource('all')" class="source-toggle-btn active" data-source="all">All</button>
+                <button onclick="setSource('fitgirl')" class="source-toggle-btn" data-source="fitgirl">FitGirl</button>
+                <button onclick="setSource('steamrip')" class="source-toggle-btn" data-source="steamrip">SteamRIP</button>
             </div>
         </div>
-        <nav class="topbar-nav">
-            <button id="navHome" onclick="showView('home')" class="nav-btn">Home</button>
-            <button id="navGames" onclick="showView('games')" class="nav-btn active">Library</button>
-            <div style="position:relative;display:inline-flex;">
-                <button id="navDownloads" onclick="showView('downloads')" class="nav-btn">Downloads</button>
-                <span id="downloadBadge" class="download-badge hidden">0</span>
-            </div>
-            <button id="navClients" onclick="showView('clients')" class="nav-btn">My Clients</button>
-            <button id="navSystemHealth" onclick="showView('systemHealth')" class="nav-btn">System Health</button>
-        </nav>
+    </aside>
+
+    <header class="topbar">
         <div class="topbar-spacer"></div>
         <div class="topbar-actions">
             <div id="userInfo" class="user-info hidden">
@@ -306,13 +378,10 @@
                     <button class="carousel-tab" data-category="to_beat" onclick="loadFeaturedCategory('to_beat')">⚡ Games to beat</button>
                     <button class="carousel-tab" data-category="surprise" onclick="loadFeaturedCategory('surprise')">🎲 Surprise me</button>
                 </div>
-                <div id="carouselMain" class="carousel-main" onclick="carouselGameClick()">
-                    <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);">
+                <div id="carouselGrid" class="carousel-grid">
+                    <div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;padding:4rem;color:var(--text-dim);">
                         <div class="spinner" style="width:48px;height:48px;border-width:4px;"></div>
                     </div>
-                </div>
-                <div id="carouselThumbs" class="carousel-thumbs">
-                    <!-- Thumbnails will be inserted here -->
                 </div>
             </div>
 
@@ -449,6 +518,10 @@
                     <option value="size_desc">Size (Largest)</option><option value="size_asc">Size (Smallest)</option>
                 </select>
                 <div class="filter-spacer"></div>
+                <div class="view-toggle">
+                    <button id="viewList" onclick="setViewMode('list')" class="view-toggle-btn active">☰ List</button>
+                    <button id="viewCard" onclick="setViewMode('card')" class="view-toggle-btn">▦ Cards</button>
+                </div>
                 <button onclick="randomGame()" class="pill-btn" title="Random game">Random</button>
                 <button id="favToggle" onclick="toggleFavoritesView()" class="pill-btn" title="Show favorites">Favorites</button>
                 <button onclick="clearFilters()" class="pill-btn-clear" title="Clear filters">✕</button>
@@ -466,6 +539,38 @@
             <div id="gamesGrid" class="game-grid"></div>
             <div id="scrollSentinel" style="height:1px"></div>
             <div id="pagination"></div>
+        </div>
+
+        <div id="libraryView" class="hidden">
+            <div class="library-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
+                <h2 style="font-size:1.75rem;font-weight:700;">My Library</h2>
+                <div class="library-tabs" style="display:flex;gap:0.5rem;background:var(--bg-surface);border-radius:10px;padding:0.25rem;">
+                    <button id="tabFavorites" onclick="switchLibraryTab('favorites')" class="library-tab active" style="padding:0.5rem 1rem;border-radius:8px;background:transparent;border:none;color:var(--text-muted);font-family:inherit;font-size:0.825rem;font-weight:600;cursor:pointer;transition:all 0.2s;">⭐ Favorites</button>
+                    <button id="tabDownloaded" onclick="switchLibraryTab('downloaded')" class="library-tab" style="padding:0.5rem 1rem;border-radius:8px;background:transparent;border:none;color:var(--text-muted);font-family:inherit;font-size:0.825rem;font-weight:600;cursor:pointer;transition:all 0.2s;">📥 Downloaded</button>
+                </div>
+            </div>
+            <div id="libraryFavoritesTab">
+                <div id="favoritesGrid" class="game-grid"></div>
+                <div id="favoritesEmpty" class="empty-state hidden">
+                    <div class="empty-icon">⭐</div>
+                    <h3 class="empty-title">No favorites yet</h3>
+                    <p class="empty-subtitle">Games you favorite will appear here for easy access.</p>
+                    <div class="empty-action">
+                        <button onclick="showView('games')" class="btn btn-primary">Browse Games</button>
+                    </div>
+                </div>
+            </div>
+            <div id="libraryDownloadedTab" class="hidden">
+                <div id="downloadedGrid" class="game-grid"></div>
+                <div id="downloadedEmpty" class="empty-state hidden">
+                    <div class="empty-icon">📥</div>
+                    <h3 class="empty-title">No downloaded games</h3>
+                    <p class="empty-subtitle">Games you've downloaded will appear here.</p>
+                    <div class="empty-action">
+                        <button onclick="showView('downloads')" class="btn btn-primary">View Downloads</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div id="downloadsView" class="hidden">

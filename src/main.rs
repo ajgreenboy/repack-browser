@@ -809,76 +809,88 @@ async fn get_featured_games(
 
     let games = match category {
         "hot" => {
-            // Most favorited in last 7 days
-            let seven_days_ago = chrono::Utc::now() - chrono::Duration::days(7);
-            let games: Vec<db::Game> = sqlx::query_as(
-                "SELECT DISTINCT g.id, g.title, g.source, g.file_size, g.magnet_link, g.genres, g.company,
-                 g.original_size, g.thumbnail_url, g.screenshots, g.source_url, g.post_date, g.search_title
-                 FROM games g
-                 JOIN user_favorites uf ON g.id = uf.game_id
-                 WHERE uf.created_at > ?
-                 GROUP BY g.id
-                 ORDER BY COUNT(uf.user_id) DESC
-                 LIMIT 10"
-            )
-            .bind(seven_days_ago.to_rfc3339())
-            .fetch_all(&state.db)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            // Use top_50 category from game_categories table
+            match db::get_games_by_category(&state.db, "top_50", 50).await {
+                Ok(games) if !games.is_empty() => games,
+                _ => {
+                    // Fallback: Most favorited in last 7 days
+                    let seven_days_ago = chrono::Utc::now() - chrono::Duration::days(7);
+                    let games: Vec<db::Game> = sqlx::query_as(
+                        "SELECT DISTINCT g.id, g.title, g.source, g.file_size, g.magnet_link, g.genres, g.company,
+                         g.original_size, g.thumbnail_url, g.screenshots, g.source_url, g.post_date, g.search_title
+                         FROM games g
+                         JOIN user_favorites uf ON g.id = uf.game_id
+                         WHERE uf.created_at > ?
+                         GROUP BY g.id
+                         ORDER BY COUNT(uf.user_id) DESC
+                         LIMIT 10"
+                    )
+                    .bind(seven_days_ago.to_rfc3339())
+                    .fetch_all(&state.db)
+                    .await
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-            // If less than 10, fill with random games
-            if games.len() < 10 {
-                let mut result = games;
-                let needed = 10 - result.len();
-                let random_games: Vec<db::Game> = sqlx::query_as(
-                    "SELECT id, title, source, file_size, magnet_link, genres, company, original_size,
-                     thumbnail_url, screenshots, source_url, post_date, search_title
-                     FROM games ORDER BY RANDOM() LIMIT ?"
-                )
-                .bind(needed as i64)
-                .fetch_all(&state.db)
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                result.extend(random_games);
-                result
-            } else {
-                games
+                    // If less than 10, fill with random games
+                    if games.len() < 10 {
+                        let mut result = games;
+                        let needed = 10 - result.len();
+                        let random_games: Vec<db::Game> = sqlx::query_as(
+                            "SELECT id, title, source, file_size, magnet_link, genres, company, original_size,
+                             thumbnail_url, screenshots, source_url, post_date, search_title
+                             FROM games ORDER BY RANDOM() LIMIT ?"
+                        )
+                        .bind(needed as i64)
+                        .fetch_all(&state.db)
+                        .await
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                        result.extend(random_games);
+                        result
+                    } else {
+                        games
+                    }
+                }
             }
         },
         "top_week" => {
-            // Most downloaded this week (using downloads table)
-            let seven_days_ago = chrono::Utc::now() - chrono::Duration::days(7);
-            let games: Vec<db::Game> = sqlx::query_as(
-                "SELECT DISTINCT g.id, g.title, g.source, g.file_size, g.magnet_link, g.genres, g.company,
-                 g.original_size, g.thumbnail_url, g.screenshots, g.source_url, g.post_date, g.search_title
-                 FROM games g
-                 JOIN downloads d ON g.id = d.game_id
-                 WHERE d.created_at > ?
-                 GROUP BY g.id
-                 ORDER BY COUNT(d.id) DESC
-                 LIMIT 10"
-            )
-            .bind(seven_days_ago.to_rfc3339())
-            .fetch_all(&state.db)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            // Use top_150 category from game_categories table
+            match db::get_games_by_category(&state.db, "top_150", 150).await {
+                Ok(games) if !games.is_empty() => games,
+                _ => {
+                    // Fallback: Most downloaded this week (using downloads table)
+                    let seven_days_ago = chrono::Utc::now() - chrono::Duration::days(7);
+                    let games: Vec<db::Game> = sqlx::query_as(
+                        "SELECT DISTINCT g.id, g.title, g.source, g.file_size, g.magnet_link, g.genres, g.company,
+                         g.original_size, g.thumbnail_url, g.screenshots, g.source_url, g.post_date, g.search_title
+                         FROM games g
+                         JOIN downloads d ON g.id = d.game_id
+                         WHERE d.created_at > ?
+                         GROUP BY g.id
+                         ORDER BY COUNT(d.id) DESC
+                         LIMIT 10"
+                    )
+                    .bind(seven_days_ago.to_rfc3339())
+                    .fetch_all(&state.db)
+                    .await
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-            if games.len() < 10 {
-                let mut result = games;
-                let needed = 10 - result.len();
-                let random_games: Vec<db::Game> = sqlx::query_as(
-                    "SELECT id, title, source, file_size, magnet_link, genres, company, original_size,
-                     thumbnail_url, screenshots, source_url, post_date, search_title
-                     FROM games ORDER BY RANDOM() LIMIT ?"
-                )
-                .bind(needed as i64)
-                .fetch_all(&state.db)
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                result.extend(random_games);
-                result
-            } else {
-                games
+                    if games.len() < 10 {
+                        let mut result = games;
+                        let needed = 10 - result.len();
+                        let random_games: Vec<db::Game> = sqlx::query_as(
+                            "SELECT id, title, source, file_size, magnet_link, genres, company, original_size,
+                             thumbnail_url, screenshots, source_url, post_date, search_title
+                             FROM games ORDER BY RANDOM() LIMIT ?"
+                        )
+                        .bind(needed as i64)
+                        .fetch_all(&state.db)
+                        .await
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                        result.extend(random_games);
+                        result
+                    } else {
+                        games
+                    }
+                }
             }
         },
         "to_beat" => {
@@ -1204,6 +1216,8 @@ async fn rescrape(
 
             // Scrape from all requested sources
             let mut all_scraped_games = Vec::new();
+            let should_scrape_fitgirl = sources_to_scrape.contains(&"fitgirl".to_string()) ||
+                                        sources_to_scrape.contains(&"all".to_string());
             for source_name in sources_to_scrape {
                 if let Some(scraper) = scraper_registry.get(&source_name) {
                     println!("Scraping from source: {}", scraper.source_label());
@@ -1391,6 +1405,57 @@ async fn rescrape(
                     match db::replace_all_games(&db, game_inserts).await {
                         Ok(count) => {
                             println!("Successfully inserted {} games", count);
+
+                            // Scrape FitGirl top repacks for carousel
+                            if should_scrape_fitgirl {
+                                println!("Scraping FitGirl top repacks for carousel...");
+                                if let Some(fitgirl_scraper) = scraper_registry.get("fitgirl") {
+                                    // Downcast to FitGirlScraper to access scrape_top_repacks method
+                                    if let Some(fitgirl) = fitgirl_scraper.as_any().downcast_ref::<scrapers::fitgirl::FitGirlScraper>() {
+                                        // Scrape top_50
+                                        match fitgirl.scrape_top_repacks("top_50").await {
+                                            Ok(top_50_titles) => {
+                                                println!("  Scraped {} titles from top_50", top_50_titles.len());
+                                                let _ = db::clear_category(&db, "top_50").await;
+                                                for (title, rank) in top_50_titles {
+                                                    // Find game_id by normalized title
+                                                    if let Ok(Some((game_id,))) = sqlx::query_as::<_, (i64,)>(
+                                                        "SELECT id FROM games WHERE search_title LIKE ? LIMIT 1"
+                                                    )
+                                                    .bind(format!("%{}%", db::clean_search_title(&title)))
+                                                    .fetch_optional(&db)
+                                                    .await
+                                                    {
+                                                        let _ = db::upsert_game_category(&db, game_id, "top_50", rank).await;
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => eprintln!("  Failed to scrape top_50: {}", e),
+                                        }
+
+                                        // Scrape top_150
+                                        match fitgirl.scrape_top_repacks("top_150").await {
+                                            Ok(top_150_titles) => {
+                                                println!("  Scraped {} titles from top_150", top_150_titles.len());
+                                                let _ = db::clear_category(&db, "top_150").await;
+                                                for (title, rank) in top_150_titles {
+                                                    // Find game_id by normalized title
+                                                    if let Ok(Some((game_id,))) = sqlx::query_as::<_, (i64,)>(
+                                                        "SELECT id FROM games WHERE search_title LIKE ? LIMIT 1"
+                                                    )
+                                                    .bind(format!("%{}%", db::clean_search_title(&title)))
+                                                    .fetch_optional(&db)
+                                                    .await
+                                                    {
+                                                        let _ = db::upsert_game_category(&db, game_id, "top_150", rank).await;
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => eprintln!("  Failed to scrape top_150: {}", e),
+                                        }
+                                    }
+                                }
+                            }
 
                             // Notify users who have new games notifications enabled
                             if count > 0 {

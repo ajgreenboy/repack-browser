@@ -20,6 +20,7 @@ let showingFavorites = false;
 let selectedSource = 'all';
 let currentUser = null; // Stores current authenticated user
 let notificationPollInterval = null;
+let viewMode = localStorage.getItem('viewMode') || 'list'; // 'list' or 'card'
 
 // ─── Authentication ───
 
@@ -154,20 +155,28 @@ function showView(view) {
     currentView = view;
     document.getElementById('homeView').classList.toggle('hidden', view !== 'home');
     document.getElementById('gamesView').classList.toggle('hidden', view !== 'games');
+    document.getElementById('libraryView').classList.toggle('hidden', view !== 'library');
     document.getElementById('downloadsView').classList.toggle('hidden', view !== 'downloads');
     document.getElementById('clientsView').classList.toggle('hidden', view !== 'clients');
     document.getElementById('systemHealthView').classList.toggle('hidden', view !== 'systemHealth');
-    document.getElementById('navHome').classList.toggle('active', view === 'home');
-    document.getElementById('navGames').classList.toggle('active', view === 'games');
-    document.getElementById('navDownloads').classList.toggle('active', view === 'downloads');
-    document.getElementById('navClients').classList.toggle('active', view === 'clients');
-    document.getElementById('navSystemHealth').classList.toggle('active', view === 'systemHealth');
+
+    // Update sidebar navigation active states
+    document.getElementById('sidebarHome').classList.toggle('active', view === 'home');
+    document.getElementById('sidebarGames').classList.toggle('active', view === 'games');
+    document.getElementById('sidebarLibrary').classList.toggle('active', view === 'library');
+    document.getElementById('sidebarDownloads').classList.toggle('active', view === 'downloads');
+    document.getElementById('sidebarClients').classList.toggle('active', view === 'clients');
+    document.getElementById('sidebarSystemHealth').classList.toggle('active', view === 'systemHealth');
 
     if (view === 'home') {
         // Load featured games carousel if not already loaded
         if (featuredGames.length === 0) {
             loadFeaturedCategory('hot');
         }
+    }
+
+    if (view === 'library') {
+        switchLibraryTab('favorites');
     }
 
     if (view === 'downloads') {
@@ -338,13 +347,18 @@ function buildCardHtml(game) {
         <div class="game-card ${isFav ? 'favorited' : ''}" onclick="showGameModal(${game.id})">
             ${thumb}
             <div class="card-body">
-                <div class="card-header">
-                    <h3 class="card-title">${escapeHtml(game.title)}</h3>
-                    ${yearBadge}
+                <div class="card-info">
+                    <div class="card-header">
+                        <h3 class="card-title">${escapeHtml(game.title)}</h3>
+                        ${yearBadge}
+                    </div>
+                    ${company}
+                    ${genres}
+                    <div class="card-size">${sizes}</div>
                 </div>
-                ${company}
-                ${genres}
-                <div class="card-size">${sizes}</div>
+                <div class="card-actions" style="display:none;">
+                    <button onclick="event.stopPropagation();toggleFavorite(${game.id})" class="fav-star" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}" style="position:static;margin:0;">${isFav ? '⭐' : '☆'}</button>
+                </div>
             </div>
         </div>
     `;
@@ -415,6 +429,110 @@ function setSource(source) {
     currentPage = 1;
     currentGames = [];
     loadGames();
+}
+
+function setViewMode(mode) {
+    viewMode = mode;
+    localStorage.setItem('viewMode', mode);
+
+    // Update toggle button states
+    document.getElementById('viewList').classList.toggle('active', mode === 'list');
+    document.getElementById('viewCard').classList.toggle('active', mode === 'card');
+
+    // Update grid container class
+    const gamesView = document.getElementById('gamesView');
+    gamesView.classList.toggle('view-mode-list', mode === 'list');
+    gamesView.classList.toggle('view-mode-card', mode === 'card');
+}
+
+// Apply saved view mode on load
+window.addEventListener('DOMContentLoaded', () => {
+    setViewMode(viewMode);
+});
+
+// ─── Library View ───
+
+function switchLibraryTab(tab) {
+    // Update tab active states
+    document.getElementById('tabFavorites').classList.toggle('active', tab === 'favorites');
+    document.getElementById('tabDownloaded').classList.toggle('active', tab === 'downloaded');
+
+    // Show/hide tab content
+    document.getElementById('libraryFavoritesTab').classList.toggle('hidden', tab !== 'favorites');
+    document.getElementById('libraryDownloadedTab').classList.toggle('hidden', tab !== 'downloaded');
+
+    // Load content
+    if (tab === 'favorites') {
+        loadLibraryFavorites();
+    } else if (tab === 'downloaded') {
+        loadLibraryDownloaded();
+    }
+}
+
+async function loadLibraryFavorites() {
+    const grid = document.getElementById('favoritesGrid');
+    const empty = document.getElementById('favoritesEmpty');
+
+    try {
+        const response = await fetch(`${API_BASE}/favorites`);
+        if (!response.ok) throw new Error('Failed to load favorites');
+
+        const data = await response.json();
+        const favoriteGames = data.favorites || [];
+
+        if (favoriteGames.length === 0) {
+            grid.innerHTML = '';
+            empty.classList.remove('hidden');
+            return;
+        }
+
+        empty.classList.add('hidden');
+        grid.innerHTML = favoriteGames.map(game => buildCardHtml(game)).join('');
+    } catch (error) {
+        console.error('Error loading favorites:', error);
+        grid.innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:2rem;">Failed to load favorites.</p>';
+    }
+}
+
+async function loadLibraryDownloaded() {
+    const grid = document.getElementById('downloadedGrid');
+    const empty = document.getElementById('downloadedEmpty');
+
+    try {
+        // Fetch completed downloads
+        const downloadsRes = await fetch(`${API_BASE}/downloads`);
+        if (!downloadsRes.ok) throw new Error('Failed to load downloads');
+
+        const downloadsData = await downloadsRes.json();
+        const completedDownloads = (downloadsData.downloads || [])
+            .filter(d => d.status === 'completed')
+            .map(d => d.game_id);
+
+        if (completedDownloads.length === 0) {
+            grid.innerHTML = '';
+            empty.classList.remove('hidden');
+            return;
+        }
+
+        // Fetch games by IDs
+        const gamesRes = await fetch(`${API_BASE}/games?ids=${completedDownloads.join(',')}`);
+        if (!gamesRes.ok) throw new Error('Failed to load games');
+
+        const gamesData = await gamesRes.json();
+        const games = gamesData.games || [];
+
+        if (games.length === 0) {
+            grid.innerHTML = '';
+            empty.classList.remove('hidden');
+            return;
+        }
+
+        empty.classList.add('hidden');
+        grid.innerHTML = games.map(game => buildCardHtml(game)).join('');
+    } catch (error) {
+        console.error('Error loading downloaded games:', error);
+        grid.innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:2rem;">Failed to load downloaded games.</p>';
+    }
 }
 
 // ─── Game Modal with Screenshot Gallery ───
@@ -717,16 +835,17 @@ async function loadDownloads() {
         const data = await response.json();
         renderDownloads(data.downloads);
 
-        // Update badge count
+        // Update badge count (both topbar and sidebar)
         const activeCount = data.downloads.filter(d =>
             d.status === 'queued' || d.status === 'downloading' || d.status === 'extracting'
         ).length;
-        const badge = document.getElementById('downloadBadge');
+
+        const sidebarBadge = document.getElementById('sidebarDownloadBadge');
         if (activeCount > 0) {
-            badge.textContent = activeCount;
-            badge.classList.remove('hidden');
+            sidebarBadge.textContent = activeCount;
+            sidebarBadge.classList.remove('hidden');
         } else {
-            badge.classList.add('hidden');
+            sidebarBadge.classList.add('hidden');
         }
     } catch (error) {
         console.error('Error loading downloads:', error);
@@ -2157,7 +2276,6 @@ let currentCategory = 'hot';
 
 async function loadFeaturedCategory(category) {
     currentCategory = category;
-    carouselIndex = 0;
 
     // Update active tab
     document.querySelectorAll('.carousel-tab').forEach(tab => {
@@ -2165,12 +2283,11 @@ async function loadFeaturedCategory(category) {
     });
 
     // Show loading state
-    document.getElementById('carouselMain').innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);">
+    document.getElementById('carouselGrid').innerHTML = `
+        <div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;padding:4rem;color:var(--text-dim);">
             <div class="spinner" style="width:48px;height:48px;border-width:4px;"></div>
         </div>
     `;
-    document.getElementById('carouselThumbs').innerHTML = '';
 
     try {
         const response = await fetch(`${API_BASE}/games/featured?category=${category}`);
@@ -2179,8 +2296,8 @@ async function loadFeaturedCategory(category) {
         featuredGames = await response.json();
 
         if (featuredGames.length === 0) {
-            document.getElementById('carouselMain').innerHTML = `
-                <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);font-size:0.875rem;">
+            document.getElementById('carouselGrid').innerHTML = `
+                <div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;padding:4rem;color:var(--text-dim);font-size:0.875rem;">
                     No games available
                 </div>
             `;
@@ -2188,11 +2305,10 @@ async function loadFeaturedCategory(category) {
         }
 
         renderCarousel();
-        renderCarouselThumbs();
     } catch (error) {
         console.error('Failed to load featured games:', error);
-        document.getElementById('carouselMain').innerHTML = `
-            <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--red);font-size:0.875rem;">
+        document.getElementById('carouselGrid').innerHTML = `
+            <div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;padding:4rem;color:var(--red);font-size:0.875rem;">
                 Failed to load featured games
             </div>
         `;
@@ -2202,92 +2318,37 @@ async function loadFeaturedCategory(category) {
 function renderCarousel() {
     if (featuredGames.length === 0) return;
 
-    const game = featuredGames[carouselIndex];
-    const hasThumb = game.thumbnail_url && game.thumbnail_url.length > 0;
+    const showRank = currentCategory === 'hot' || currentCategory === 'top_week';
+    const cardsToShow = featuredGames.slice(0, 6); // 2x3 grid
 
-    const genres = game.genres
-        ? game.genres.split(',').slice(0, 5).map(g =>
-            `<span class="carousel-genre-tag">${escapeHtml(g.trim())}</span>`
-        ).join('')
-        : '';
-
-    const imgHtml = hasThumb
-        ? `<img src="${escapeHtml(game.thumbnail_url)}" alt="${escapeHtml(game.title)}">`
-        : `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:6rem;color:var(--text-dim);opacity:0.2;">🎮</div>`;
-
-    document.getElementById('carouselMain').innerHTML = `
-        ${imgHtml}
-        ${featuredGames.length > 1 ? `
-            <button class="carousel-nav carousel-nav-prev" onclick="event.stopPropagation();prevCarousel()">‹</button>
-            <button class="carousel-nav carousel-nav-next" onclick="event.stopPropagation();nextCarousel()">›</button>
-        ` : ''}
-        <div class="carousel-info">
-            <h2 class="carousel-title">${escapeHtml(game.title)}</h2>
-            <div class="carousel-meta">
-                <span>${escapeHtml(game.file_size)}</span>
-                ${game.company ? `<span>•</span><span>${escapeHtml(game.company)}</span>` : ''}
-                ${game.post_date ? `<span>•</span><span>${game.post_date.substring(0, 4)}</span>` : ''}
-            </div>
-            ${genres ? `<div class="carousel-genres">${genres}</div>` : ''}
-            <div class="carousel-actions">
-                <button class="carousel-btn carousel-btn-primary" onclick="event.stopPropagation();showGameModal(${game.id})">
-                    View Details
-                </button>
-                <button class="carousel-btn carousel-btn-secondary" onclick="event.stopPropagation();queueDownload(${game.id})">
-                    Download
-                </button>
-            </div>
-        </div>
-    `;
-}
-
-function renderCarouselThumbs() {
-    const container = document.getElementById('carouselThumbs');
-
-    container.innerHTML = featuredGames.map((game, index) => {
+    const html = cardsToShow.map((game, index) => {
         const hasThumb = game.thumbnail_url && game.thumbnail_url.length > 0;
         const thumbContent = hasThumb
-            ? `<img src="${escapeHtml(game.thumbnail_url)}" alt="${escapeHtml(game.title)}">`
-            : `<div style="display:flex;align-items:center;justify-content:center;height:100%;background:var(--bg-deep);color:var(--text-dim);font-size:1.5rem;">🎮</div>`;
+            ? `<img src="${escapeHtml(game.thumbnail_url)}" alt="${escapeHtml(game.title)}" loading="lazy">`
+            : `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:3rem;color:var(--text-dim);opacity:0.3;">🎮</div>`;
+
+        const rankBadge = showRank ? `<div class="carousel-card-rank">#${index + 1}</div>` : '';
 
         return `
-            <div class="carousel-thumb ${index === carouselIndex ? 'active' : ''}"
-                 onclick="goToCarouselIndex(${index})"
-                 data-index="${index}">
-                ${thumbContent}
+            <div class="carousel-card" onclick="showGameModal(${game.id})">
+                <div class="carousel-card-thumb">
+                    ${thumbContent}
+                    ${rankBadge}
+                </div>
+                <div class="carousel-card-body">
+                    <div class="carousel-card-title">${escapeHtml(game.title)}</div>
+                    <div class="carousel-card-size">${escapeHtml(game.file_size)}</div>
+                </div>
             </div>
         `;
     }).join('');
+
+    document.getElementById('carouselGrid').innerHTML = html;
 }
 
-function nextCarousel() {
-    carouselIndex = (carouselIndex + 1) % featuredGames.length;
-    renderCarousel();
-    updateCarouselThumbs();
-}
-
-function prevCarousel() {
-    carouselIndex = (carouselIndex - 1 + featuredGames.length) % featuredGames.length;
-    renderCarousel();
-    updateCarouselThumbs();
-}
-
-function goToCarouselIndex(index) {
-    carouselIndex = index;
-    renderCarousel();
-    updateCarouselThumbs();
-}
-
-function updateCarouselThumbs() {
-    document.querySelectorAll('.carousel-thumb').forEach((thumb, index) => {
-        thumb.classList.toggle('active', index === carouselIndex);
-    });
-}
-
-function carouselGameClick() {
-    if (featuredGames.length > 0) {
-        showGameModal(featuredGames[carouselIndex].id);
-    }
+// Remove unused carousel navigation functions
+function renderCarouselThumbs() {
+    // No longer needed with grid layout
 }
 
 // ─── Notifications ───
