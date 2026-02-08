@@ -6,6 +6,7 @@ use warp::Filter;
 #[derive(Debug, Deserialize)]
 pub struct DownloadRequest {
     pub game_id: i64,
+    #[allow(dead_code)]
     pub user_id: Option<i64>,
 }
 

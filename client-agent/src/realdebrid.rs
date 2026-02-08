@@ -9,6 +9,7 @@ pub struct RealDebridClient {
 
 #[derive(Debug, Deserialize)]
 struct TorrentInfo {
+    #[allow(dead_code)]
     id: String,
     status: String,
     links: Vec<String>,
@@ -22,6 +23,7 @@ struct AddMagnetRequest {
 #[derive(Debug, Deserialize)]
 struct AddMagnetResponse {
     id: String,
+    #[allow(dead_code)]
     uri: String,
 }
 
@@ -33,7 +35,9 @@ struct SelectFilesRequest {
 #[derive(Debug, Deserialize)]
 struct UnrestrictResponse {
     download: String,
+    #[allow(dead_code)]
     filename: String,
+    #[allow(dead_code)]
     filesize: Option<i64>,
 }
 

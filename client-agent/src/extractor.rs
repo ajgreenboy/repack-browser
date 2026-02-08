@@ -1,11 +1,8 @@
-use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractionProgress {
@@ -44,10 +41,6 @@ impl Extractor {
                 status: ExtractionStatus::Extracting,
             })),
         }
-    }
-
-    pub fn get_progress(&self) -> Arc<RwLock<ExtractionProgress>> {
-        self.progress.clone()
     }
 
     pub async fn extract_zip(
@@ -187,76 +180,6 @@ impl Extractor {
         Ok(())
     }
 
-    pub async fn extract(
-        &self,
-        archive_path: &Path,
-        output_dir: &Path,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        std::fs::create_dir_all(output_dir)?;
-
-        let extension = archive_path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-
-        match extension.as_str() {
-            "zip" => self.extract_zip(archive_path, output_dir).await,
-            "7z" => self.extract_7z(archive_path, output_dir).await,
-            "rar" => self.extract_rar(archive_path, output_dir).await,
-            _ => Err(format!("Unsupported archive format: {}", extension).into()),
-        }
-    }
-
-    pub async fn verify_md5(
-        &self,
-        directory: &Path,
-        expected_md5: &str,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
-        {
-            let mut prog = self.progress.write().await;
-            prog.status = ExtractionStatus::Verifying;
-        }
-
-        // Calculate MD5 of all files in directory
-        let mut files: Vec<PathBuf> = WalkDir::new(directory)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-            .map(|e| e.path().to_path_buf())
-            .collect();
-
-        files.sort();
-
-        let mut hasher = md5::Context::new();
-
-        for file_path in files {
-            let mut file = File::open(&file_path)?;
-            let mut buffer = [0; 8192];
-
-            loop {
-                let n = file.read(&mut buffer)?;
-                if n == 0 {
-                    break;
-                }
-                hasher.consume(&buffer[..n]);
-            }
-        }
-
-        let digest = format!("{:x}", hasher.compute());
-        let matches = digest.eq_ignore_ascii_case(expected_md5);
-
-        {
-            let mut prog = self.progress.write().await;
-            prog.status = if matches {
-                ExtractionStatus::Completed
-            } else {
-                ExtractionStatus::Failed
-            };
-        }
-
-        Ok(matches)
-    }
 }
 
 // Standalone helper functions for simple extraction without progress tracking

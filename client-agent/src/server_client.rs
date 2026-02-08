@@ -16,6 +16,7 @@ struct RegisterRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct RegisterResponse {
     success: bool,
     message: String,
@@ -24,16 +25,24 @@ struct RegisterResponse {
 #[derive(Debug, Deserialize, Clone)]
 pub struct DownloadQueueItem {
     pub id: i64,
+    #[allow(dead_code)]
     pub game_id: i64,
     pub game_title: String,
+    #[allow(dead_code)]
     pub game_size: String,
+    #[allow(dead_code)]
     pub magnet_link: String,
     pub direct_urls: Vec<String>,
     pub status: String,
+    #[allow(dead_code)]
     pub progress: f64,
+    #[allow(dead_code)]
     pub download_speed: Option<String>,
+    #[allow(dead_code)]
     pub eta: Option<String>,
+    #[allow(dead_code)]
     pub error_message: Option<String>,
+    #[allow(dead_code)]
     pub created_at: String,
 }
 
@@ -123,6 +132,7 @@ impl ServerClient {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn report_progress(
         &self,
         client_id: &str,
@@ -139,6 +149,7 @@ impl ServerClient {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn report_system_info(
         &self,
         system_info: &SystemInfo,
@@ -157,6 +168,7 @@ impl ServerClient {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn health_check(&self) -> bool {
         let url = format!("{}/api/health", self.base_url);
 

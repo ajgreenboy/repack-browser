@@ -43,8 +43,10 @@ struct AppState {
 #[derive(Clone)]
 struct InstallationInfo {
     game_title: String,
+    #[allow(dead_code)]
     installer_path: PathBuf,
     started_at: String,
+    #[allow(dead_code)]
     status: String,
 }
 
@@ -53,6 +55,7 @@ struct SettingsWindow {
     server_url: String,
     download_folder: String,
     run_on_startup: bool,
+    #[allow(dead_code)]
     show_window: Arc<RwLock<bool>>,
 }
 
