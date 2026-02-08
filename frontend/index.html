@@ -22,6 +22,64 @@
 
         .hidden{display:none!important}
 
+        /* ── Featured Carousel ── */
+        .featured-carousel{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:2rem}
+        .carousel-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--bg-surface);padding:0.5rem}
+        .carousel-tab{padding:0.5rem 1rem;border-radius:8px;background:transparent;border:none;color:var(--text-muted);font-family:inherit;font-size:0.825rem;font-weight:600;cursor:pointer;transition:all 0.2s}
+        .carousel-tab:hover{background:var(--bg-card);color:var(--text)}
+        .carousel-tab.active{background:var(--accent);color:#fff}
+        .carousel-main{position:relative;aspect-ratio:21/9;background:var(--bg-deep);overflow:hidden;cursor:pointer}
+        .carousel-main img{width:100%;height:100%;object-fit:cover;display:block}
+        .carousel-info{position:absolute;bottom:0;left:0;right:0;padding:2rem;background:linear-gradient(180deg,transparent 0%,rgba(0,0,0,0.85) 100%);color:#fff}
+        .carousel-title{font-size:1.75rem;font-weight:700;margin-bottom:0.5rem}
+        .carousel-meta{display:flex;gap:1rem;font-size:0.875rem;color:rgba(255,255,255,0.7);margin-bottom:0.75rem}
+        .carousel-genres{display:flex;flex-wrap:wrap;gap:0.375rem;margin-bottom:1rem}
+        .carousel-genre-tag{font-size:0.7rem;font-weight:500;padding:0.25rem 0.6rem;border-radius:999px;background:rgba(59,130,246,0.25);color:#93c5fd;backdrop-filter:blur(4px)}
+        .carousel-actions{display:flex;gap:0.5rem}
+        .carousel-btn{padding:0.6rem 1.25rem;border-radius:8px;border:none;font-family:inherit;font-size:0.85rem;font-weight:600;cursor:pointer;transition:all 0.2s}
+        .carousel-btn-primary{background:var(--accent);color:#fff}
+        .carousel-btn-primary:hover{background:var(--accent-hover)}
+        .carousel-btn-secondary{background:rgba(255,255,255,0.15);color:#fff;backdrop-filter:blur(4px)}
+        .carousel-btn-secondary:hover{background:rgba(255,255,255,0.25)}
+        .carousel-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);color:#fff;border:none;border-radius:50%;width:3rem;height:3rem;cursor:pointer;font-size:1.5rem;display:flex;align-items:center;justify-content:center;transition:all 0.2s;z-index:2}
+        .carousel-nav:hover{background:rgba(0,0,0,0.7);transform:translateY(-50%) scale(1.1)}
+        .carousel-nav-prev{left:1rem}
+        .carousel-nav-next{right:1rem}
+        .carousel-thumbs{display:flex;gap:0.5rem;padding:1rem;overflow-x:auto;scrollbar-width:thin}
+        .carousel-thumb{flex-shrink:0;width:120px;height:68px;border-radius:8px;overflow:hidden;cursor:pointer;border:2px solid transparent;transition:all 0.2s;opacity:0.6}
+        .carousel-thumb:hover{opacity:1;border-color:var(--accent)}
+        .carousel-thumb.active{opacity:1;border-color:var(--accent)}
+        .carousel-thumb img{width:100%;height:100%;object-fit:cover}
+
+        /* ── Right Sidebar ── */
+        .right-sidebar{position:fixed;right:0;top:60px;bottom:0;width:280px;background:var(--bg-card);border-left:1px solid var(--border);padding:1.25rem;overflow-y:auto;z-index:50;transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1)}
+        .right-sidebar.open{transform:translateX(0)}
+        .sidebar-toggle{position:fixed;right:1rem;bottom:1rem;width:48px;height:48px;border-radius:50%;background:var(--accent);color:#fff;border:none;cursor:pointer;box-shadow:0 4px 12px rgba(59,130,246,0.4);display:flex;align-items:center;justify-content:center;font-size:1.25rem;z-index:60;transition:all 0.2s}
+        .sidebar-toggle:hover{background:var(--accent-hover);transform:scale(1.1)}
+        .sidebar-section{margin-bottom:1.5rem}
+        .sidebar-title{font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-dim);margin-bottom:0.5rem}
+        .sidebar-search{width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:0.4rem 0.6rem;color:var(--text);font-family:inherit;font-size:0.75rem;outline:none;margin-bottom:0.5rem}
+        .sidebar-search:focus{border-color:var(--accent)}
+        .filter-list{display:flex;flex-direction:column;gap:0.25rem;max-height:300px;overflow-y:auto}
+        .filter-item{display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0.6rem;border-radius:6px;cursor:pointer;transition:background 0.15s;font-size:0.8rem}
+        .filter-item:hover{background:var(--bg-surface)}
+        .filter-item.active{background:var(--accent-glow);color:var(--accent-bright)}
+        .filter-count{font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:var(--text-dim)}
+
+        /* ── Notification Panel ── */
+        .notification-panel{position:fixed;top:60px;right:1rem;width:360px;max-height:480px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:150;transform:translateY(-10px);opacity:0;transition:all 0.2s;pointer-events:none}
+        .notification-panel:not(.hidden){transform:translateY(0);opacity:1;pointer-events:auto}
+        .notification-header{display:flex;justify-content:space-between;align-items:center;padding:1rem;border-bottom:1px solid var(--border)}
+        .notification-list{max-height:400px;overflow-y:auto}
+        .notification-item{padding:0.875rem 1rem;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;position:relative}
+        .notification-item:hover{background:var(--bg-surface)}
+        .notification-item.unread{background:var(--accent-glow)}
+        .notification-item.unread::before{content:'';position:absolute;left:0.5rem;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:var(--accent)}
+        .notification-title{font-size:0.8rem;font-weight:600;margin-bottom:0.25rem;padding-left:1rem}
+        .notification-item.unread .notification-title{color:var(--accent-bright)}
+        .notification-message{font-size:0.75rem;color:var(--text-muted);margin-bottom:0.25rem;padding-left:1rem}
+        .notification-time{font-size:0.65rem;color:var(--text-dim);padding-left:1rem}
+
         /* ── Top Bar ── */
         .topbar{position:sticky;top:0;z-index:100;background:rgba(12,16,24,0.82);backdrop-filter:blur(24px) saturate(1.2);-webkit-backdrop-filter:blur(24px) saturate(1.2);border-bottom:1px solid var(--border);padding:0 1.75rem;height:60px;display:flex;align-items:center;gap:0.5rem}
         .topbar-logo{display:flex;align-items:center;gap:0.625rem;margin-right:1.5rem;flex-shrink:0}
@@ -141,14 +199,22 @@
         .form-row{display:flex;gap:0.5rem;align-items:center}
         .form-status{font-size:0.7rem;color:var(--text-dim);margin-top:0.25rem}
         .form-group + .form-group{margin-top:1.25rem}
+        .settings-tab{padding:0.5rem 1rem;border-radius:8px 8px 0 0;background:transparent;border:none;color:var(--text-muted);font-family:inherit;font-size:0.8rem;font-weight:600;cursor:pointer;transition:all 0.2s;border-bottom:2px solid transparent}
+        .settings-tab:hover{background:var(--bg-surface);color:var(--text)}
+        .settings-tab.active{background:transparent;color:var(--accent);border-bottom-color:var(--accent)}
+        .settings-panel{display:block}
+        .settings-panel.hidden{display:none}
+        .checkbox-group{display:flex;flex-direction:column;gap:0.5rem}
 
         /* ── Utilities ── */
         .spinner{border:3px solid rgba(255,255,255,0.08);border-top-color:var(--accent);border-radius:50%;width:24px;height:24px;animation:spin 0.7s linear infinite;display:inline-block;vertical-align:middle}
         @keyframes spin{to{transform:rotate(360deg)}}
         .loading-state{display:flex;justify-content:center;align-items:center;padding:4rem 0}
-        .empty-state{text-align:center;padding:4rem 0}
-        .empty-state p:first-child{font-size:1.25rem;color:var(--text-dim);margin-bottom:0.5rem}
-        .empty-state p:last-child{font-size:0.85rem;color:var(--text-dim)}
+        .empty-state{text-align:center;padding:4rem 2rem;max-width:420px;margin:0 auto}
+        .empty-icon{font-size:4rem;margin-bottom:1rem;opacity:0.4}
+        .empty-title{font-size:1.35rem;font-weight:700;color:var(--text);margin-bottom:0.5rem}
+        .empty-subtitle{font-size:0.9rem;color:var(--text-muted);line-height:1.5;margin-bottom:1.5rem;max-width:360px;margin-left:auto;margin-right:auto}
+        .empty-action{margin-top:1rem}
         .toast{position:fixed;bottom:1.25rem;right:1.25rem;background:var(--bg-card);border:1px solid var(--border);padding:0.75rem 1.25rem;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);z-index:300;max-width:360px;font-size:0.85rem}
         .toast-success{border-left:3px solid var(--green)} .toast-error{border-left:3px solid var(--red)} .toast-info{border-left:3px solid var(--accent)}
         .screenshot-thumb{border:2px solid transparent}
@@ -159,6 +225,7 @@
             .topbar{padding:0 1rem;gap:0.25rem} .content{padding:1rem} .scrape-progress,.error-banner{margin:0.5rem 1rem 0}
             .filter-bar{gap:0.5rem} .filter-input{min-width:100%} .game-grid{grid-template-columns:repeat(2,1fr);gap:0.625rem}
             .scrape-stats{grid-template-columns:repeat(2,1fr)} .topbar-logo-text{display:none}
+            .right-sidebar{width:100%;top:60px} .sidebar-toggle{bottom:4rem}
         }
     </style>
 </head>
@@ -187,12 +254,27 @@
                 <span id="userName" class="user-info-name"></span>
                 <span id="userAdmin" class="user-info-admin hidden">ADMIN</span>
             </div>
+            <div style="position:relative;">
+                <button id="notificationBtn" onclick="toggleNotificationPanel()" class="icon-btn" title="Notifications">🔔</button>
+                <span id="notificationBadge" class="download-badge hidden" style="right:-5px;">0</span>
+            </div>
             <button onclick="showUploadModal()" class="icon-btn" title="Upload CSV">CSV</button>
             <button id="scrapeBtn" onclick="rescrape()" class="icon-btn" title="Re-scrape site">Scrape</button>
             <button onclick="showSettingsModal()" class="icon-btn" title="Settings">Settings</button>
             <button id="logoutBtn" onclick="handleLogout()" class="logout-btn hidden" title="Logout">Logout</button>
         </div>
     </header>
+
+    <!-- Notification Panel -->
+    <div id="notificationPanel" class="notification-panel hidden">
+        <div class="notification-header">
+            <h3 style="font-size:0.9rem;font-weight:700;">Notifications</h3>
+            <button onclick="markAllNotificationsRead()" class="btn btn-ghost" style="padding:0.25rem 0.5rem;font-size:0.75rem;">Mark all read</button>
+        </div>
+        <div id="notificationList" class="notification-list">
+            <div style="text-align:center;padding:2rem;color:var(--text-dim);font-size:0.85rem;">Loading...</div>
+        </div>
+    </div>
 
     <div id="scrapeProgressContainer" class="hidden scrape-progress">
         <div class="scrape-header">
@@ -216,6 +298,24 @@
 
     <main class="content">
         <div id="homeView" class="hidden">
+            <!-- Featured Games Carousel -->
+            <div class="featured-carousel">
+                <div class="carousel-tabs">
+                    <button class="carousel-tab active" data-category="hot" onclick="loadFeaturedCategory('hot')">🔥 Hot now</button>
+                    <button class="carousel-tab" data-category="top_week" onclick="loadFeaturedCategory('top_week')">📈 Top of week</button>
+                    <button class="carousel-tab" data-category="to_beat" onclick="loadFeaturedCategory('to_beat')">⚡ Games to beat</button>
+                    <button class="carousel-tab" data-category="surprise" onclick="loadFeaturedCategory('surprise')">🎲 Surprise me</button>
+                </div>
+                <div id="carouselMain" class="carousel-main" onclick="carouselGameClick()">
+                    <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);">
+                        <div class="spinner" style="width:48px;height:48px;border-width:4px;"></div>
+                    </div>
+                </div>
+                <div id="carouselThumbs" class="carousel-thumbs">
+                    <!-- Thumbnails will be inserted here -->
+                </div>
+            </div>
+
             <div style="max-width:900px;margin:0 auto;">
                 <div style="text-align:center;margin-bottom:2.5rem;">
                     <h1 style="font-size:2.5rem;font-weight:800;margin-bottom:0.5rem;background:linear-gradient(135deg,var(--accent),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">Multi-Source Game Browser</h1>
@@ -355,7 +455,14 @@
             </div>
             <p id="statsText" class="stats-text">Loading...</p>
             <div id="loadingIndicator" class="hidden loading-state"><div style="text-align:center"><div class="spinner" style="width:36px;height:36px;border-width:3px;margin-bottom:0.75rem;"></div><p style="color:var(--text-dim);font-size:0.85rem;">Loading games...</p></div></div>
-            <div id="emptyState" class="hidden empty-state"><p>No games found</p><p>Upload a CSV or run the scraper to get started.</p></div>
+            <div id="emptyState" class="hidden empty-state">
+                <div class="empty-icon">🎮</div>
+                <h3 class="empty-title">No games found</h3>
+                <p class="empty-subtitle">We couldn't find any games matching your filters. Try adjusting your search or clear all filters to browse the full library.</p>
+                <div class="empty-action">
+                    <button onclick="clearFilters()" class="btn btn-primary">Clear Filters</button>
+                </div>
+            </div>
             <div id="gamesGrid" class="game-grid"></div>
             <div id="scrollSentinel" style="height:1px"></div>
             <div id="pagination"></div>
@@ -371,7 +478,16 @@
                     🔍 Scan Existing Games
                 </button>
             </div>
-            <div id="downloadsList"><div class="empty-state"><p>No downloads yet</p><p>Click a game and hit "Get Links" to get started.</p></div></div>
+            <div id="downloadsList">
+                <div class="empty-state">
+                    <div class="empty-icon">📥</div>
+                    <h3 class="empty-title">No downloads yet</h3>
+                    <p class="empty-subtitle">Your download queue is empty. Browse the game library and click the Download button to start downloading games.</p>
+                    <div class="empty-action">
+                        <button onclick="showView('games')" class="btn btn-primary">Browse Games</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div id="clientsView" class="hidden">
@@ -429,20 +545,101 @@
     </div>
 
     <div id="settingsModal" class="hidden modal-overlay">
-        <div class="modal-box md">
+        <div class="modal-box lg">
             <h2 class="modal-title">Settings</h2>
-            <div class="form-group">
-                <label class="form-label">RAWG API Key <span class="hint">(for game images & metadata)</span></label>
-                <p class="form-help">Free at <a href="https://rawg.io/apidocs" target="_blank">rawg.io/apidocs</a></p>
-                <div class="form-row"><input type="password" id="settingRawgKey" placeholder="Enter RAWG API key..." class="form-input"><button onclick="toggleKeyVisibility('settingRawgKey')" class="btn btn-ghost" style="flex:0;padding:0.5rem 0.75rem;">👁</button></div>
-                <p id="rawgKeyStatus" class="form-status"></p>
+
+            <!-- Settings Tabs -->
+            <div style="display:flex;gap:0.25rem;border-bottom:1px solid var(--border);margin-bottom:1.25rem;">
+                <button class="settings-tab active" data-tab="general" onclick="switchSettingsTab('general')">General</button>
+                <button class="settings-tab" data-tab="sources" onclick="switchSettingsTab('sources')">Sources</button>
+                <button class="settings-tab" data-tab="realdebrid" onclick="switchSettingsTab('realdebrid')">Real-Debrid</button>
+                <button class="settings-tab" data-tab="appearance" onclick="switchSettingsTab('appearance')">Appearance</button>
+                <button class="settings-tab" data-tab="notifications" onclick="switchSettingsTab('notifications')">Notifications</button>
             </div>
-            <div class="form-group">
-                <label class="form-label">Real-Debrid API Key <span class="hint">(for downloads)</span></label>
-                <p class="form-help">Get from <a href="https://real-debrid.com/apitoken" target="_blank">real-debrid.com/apitoken</a></p>
-                <div class="form-row"><input type="password" id="settingRdKey" placeholder="Enter Real-Debrid API key..." class="form-input"><button onclick="toggleKeyVisibility('settingRdKey')" class="btn btn-ghost" style="flex:0;padding:0.5rem 0.75rem;">👁</button></div>
-                <p id="rdKeyStatus" class="form-status"></p>
+
+            <!-- General Tab -->
+            <div id="settingsTabGeneral" class="settings-panel">
+                <div class="form-group">
+                    <label class="form-label">Download Path <span class="hint">(optional)</span></label>
+                    <p class="form-help">Default download directory for games. Leave blank for default.</p>
+                    <input type="text" id="settingDownloadPath" placeholder="e.g. C:\Games" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">RAWG API Key <span class="hint">(for game images & metadata)</span></label>
+                    <p class="form-help">Free at <a href="https://rawg.io/apidocs" target="_blank">rawg.io/apidocs</a></p>
+                    <div class="form-row"><input type="password" id="settingRawgKey" placeholder="Enter RAWG API key..." class="form-input"><button onclick="toggleKeyVisibility('settingRawgKey')" class="btn btn-ghost" style="flex:0;padding:0.5rem 0.75rem;">👁</button></div>
+                    <p id="rawgKeyStatus" class="form-status"></p>
+                </div>
             </div>
+
+            <!-- Sources Tab -->
+            <div id="settingsTabSources" class="settings-panel hidden">
+                <div class="form-group">
+                    <label class="form-label">Enabled Scrapers</label>
+                    <p class="form-help">Choose which sources to scrape games from.</p>
+                    <div class="checkbox-group" style="display:flex;flex-direction:column;gap:0.75rem;margin-top:0.5rem;">
+                        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+                            <input type="checkbox" id="settingScraperFitgirl" checked style="width:18px;height:18px;cursor:pointer;">
+                            <span style="font-weight:500;">FitGirl Repacks</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+                            <input type="checkbox" id="settingScraperSteamrip" checked style="width:18px;height:18px;cursor:pointer;">
+                            <span style="font-weight:500;">SteamRIP</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-Debrid Tab -->
+            <div id="settingsTabRealdebrid" class="settings-panel hidden">
+                <div class="form-group">
+                    <label class="form-label">Real-Debrid API Key <span class="hint">(required for downloads)</span></label>
+                    <p class="form-help">Get from <a href="https://real-debrid.com/apitoken" target="_blank">real-debrid.com/apitoken</a></p>
+                    <div class="form-row"><input type="password" id="settingRdKey" placeholder="Enter Real-Debrid API key..." class="form-input"><button onclick="toggleKeyVisibility('settingRdKey')" class="btn btn-ghost" style="flex:0;padding:0.5rem 0.75rem;">👁</button></div>
+                    <p id="rdKeyStatus" class="form-status"></p>
+                </div>
+            </div>
+
+            <!-- Appearance Tab -->
+            <div id="settingsTabAppearance" class="settings-panel hidden">
+                <div class="form-group">
+                    <label class="form-label">Theme</label>
+                    <select id="settingTheme" class="form-input">
+                        <option value="dark">Dark (Default)</option>
+                        <option value="light" disabled>Light (Coming Soon)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Notifications Tab -->
+            <div id="settingsTabNotifications" class="settings-panel hidden">
+                <div class="form-group">
+                    <label class="form-label">Notification Preferences</label>
+                    <p class="form-help">Choose which events trigger notifications.</p>
+                    <div class="checkbox-group" style="display:flex;flex-direction:column;gap:0.75rem;margin-top:0.5rem;">
+                        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+                            <input type="checkbox" id="settingNotifyDownloadComplete" checked style="width:18px;height:18px;cursor:pointer;">
+                            <span style="font-weight:500;">Download completed</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+                            <input type="checkbox" id="settingNotifyNewGames" style="width:18px;height:18px;cursor:pointer;">
+                            <span style="font-weight:500;">New games available (after scrape)</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+                            <input type="checkbox" id="settingNotifyErrors" checked style="width:18px;height:18px;cursor:pointer;">
+                            <span style="font-weight:500;">Errors and failures</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Browser Notifications</label>
+                    <button id="requestNotificationBtn" onclick="requestNotificationPermission()" class="btn btn-ghost" style="width:100%;">
+                        Enable Browser Notifications
+                    </button>
+                    <p id="notificationStatus" class="form-status"></p>
+                </div>
+            </div>
+
             <div class="modal-actions"><button onclick="saveSettings()" class="btn btn-primary">Save</button><button onclick="hideSettingsModal()" class="btn btn-secondary">Cancel</button></div>
         </div>
     </div>
@@ -501,6 +698,29 @@
             </div>
         </div>
     </div>
+
+    <!-- Right Sidebar -->
+    <aside id="rightSidebar" class="right-sidebar">
+        <div class="sidebar-section">
+            <h3 class="sidebar-title">Genres</h3>
+            <input type="text" id="genreSidebarSearch" placeholder="Search genres..." class="sidebar-search" onkeyup="filterSidebarGenres()">
+            <div id="genreFilterList" class="filter-list">
+                <div style="text-align:center;padding:1rem;color:var(--text-dim);font-size:0.75rem;">Loading...</div>
+            </div>
+        </div>
+        <div class="sidebar-section">
+            <h3 class="sidebar-title">Tags</h3>
+            <input type="text" id="tagSidebarSearch" placeholder="Search tags..." class="sidebar-search" onkeyup="filterSidebarTags()">
+            <div id="tagFilterList" class="filter-list">
+                <div style="text-align:center;padding:1rem;color:var(--text-dim);font-size:0.75rem;">Loading...</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Sidebar Toggle Button -->
+    <button id="sidebarToggle" class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle filters">
+        🔍
+    </button>
 
     <div id="toast" class="hidden toast"><p id="toastMessage"></p></div>
     <script src="app.js"></script>

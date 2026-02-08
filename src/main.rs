@@ -238,8 +238,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/games", get(get_games))
         .route("/api/games/:id", get(get_game_detail))
         .route("/api/games/genres", get(get_genres))
+        .route("/api/games/tags", get(get_tags))
+        .route("/api/games/:id/tags", post(add_tag))
+        .route("/api/games/:id/tags/:tag", delete(remove_tag))
         .route("/api/games/random", get(get_random_game))
+        .route("/api/games/featured", get(get_featured_games))
         .route("/api/games/favorites", get(get_favorites))
+        // Notifications
+        .route("/api/notifications", get(get_notifications))
+        .route("/api/notifications/count", get(get_notification_count))
+        .route("/api/notifications/:id/read", post(mark_notification_read_handler))
+        .route("/api/notifications/read-all", post(mark_all_notifications_read_handler))
         .route("/api/games/favorites/:id", post(add_favorite))
         .route("/api/games/favorites/:id", delete(remove_favorite))
         .route("/api/games/upload", post(upload_csv))
@@ -621,6 +630,299 @@ async fn get_genres(
             serde_json::json!({ "name": name, "count": count })
         }).collect::<Vec<_>>()
     })))
+}
+
+// ─── Tags ───
+
+async fn get_tags(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let tags = db::get_all_tags(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(serde_json::json!({
+        "tags": tags.into_iter().map(|(name, count)| {
+            serde_json::json!({ "name": name, "count": count })
+        }).collect::<Vec<_>>()
+    })))
+}
+
+async fn add_tag(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(payload): Json<serde_json::Value>,
+) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    // Require admin
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false, message: e, downloads: None, download_id: None,
+        })))?;
+
+    if !user.is_admin {
+        return Err((StatusCode::FORBIDDEN, Json(ApiResponse {
+            success: false, message: "Admin access required".to_string(), downloads: None, download_id: None,
+        })));
+    }
+
+    let tag = payload.get("tag")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, Json(ApiResponse {
+            success: false, message: "Missing tag".to_string(), downloads: None, download_id: None,
+        })))?;
+
+    db::add_game_tag(&state.db, id, tag).await.map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
+            success: false, message: e.to_string(), downloads: None, download_id: None,
+        }))
+    })?;
+
+    Ok(Json(ApiResponse {
+        success: true,
+        message: "Tag added".to_string(),
+        downloads: None,
+        download_id: None,
+    }))
+}
+
+async fn remove_tag(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, tag)): Path<(i64, String)>,
+) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    // Require admin
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false, message: e, downloads: None, download_id: None,
+        })))?;
+
+    if !user.is_admin {
+        return Err((StatusCode::FORBIDDEN, Json(ApiResponse {
+            success: false, message: "Admin access required".to_string(), downloads: None, download_id: None,
+        })));
+    }
+
+    db::remove_game_tag(&state.db, id, &tag).await.map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
+            success: false, message: e.to_string(), downloads: None, download_id: None,
+        }))
+    })?;
+
+    Ok(Json(ApiResponse {
+        success: true,
+        message: "Tag removed".to_string(),
+        downloads: None,
+        download_id: None,
+    }))
+}
+
+// ─── Notifications ───
+
+async fn get_notifications(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<db::Notification>>, StatusCode> {
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let notifications = db::get_user_notifications(&state.db, user.id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(notifications))
+}
+
+async fn get_notification_count(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let count = db::get_unread_notification_count(&state.db, user.id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(serde_json::json!({ "count": count })))
+}
+
+async fn mark_notification_read_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false, message: e, downloads: None, download_id: None,
+        })))?;
+
+    db::mark_notification_read(&state.db, id, user.id).await.map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
+            success: false, message: e.to_string(), downloads: None, download_id: None,
+        }))
+    })?;
+
+    Ok(Json(ApiResponse {
+        success: true,
+        message: "Notification marked as read".to_string(),
+        downloads: None,
+        download_id: None,
+    }))
+}
+
+async fn mark_all_notifications_read_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false, message: e, downloads: None, download_id: None,
+        })))?;
+
+    db::mark_all_notifications_read(&state.db, user.id).await.map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
+            success: false, message: e.to_string(), downloads: None, download_id: None,
+        }))
+    })?;
+
+    Ok(Json(ApiResponse {
+        success: true,
+        message: "All notifications marked as read".to_string(),
+        downloads: None,
+        download_id: None,
+    }))
+}
+
+// ─── Featured Games ───
+
+#[derive(Deserialize)]
+struct FeaturedQuery {
+    category: Option<String>,
+}
+
+async fn get_featured_games(
+    State(state): State<AppState>,
+    Query(params): Query<FeaturedQuery>,
+) -> Result<Json<Vec<db::Game>>, StatusCode> {
+    let category = params.category.as_deref().unwrap_or("hot");
+
+    let games = match category {
+        "hot" => {
+            // Most favorited in last 7 days
+            let seven_days_ago = chrono::Utc::now() - chrono::Duration::days(7);
+            let games: Vec<db::Game> = sqlx::query_as(
+                "SELECT DISTINCT g.id, g.title, g.source, g.file_size, g.magnet_link, g.genres, g.company,
+                 g.original_size, g.thumbnail_url, g.screenshots, g.source_url, g.post_date, g.search_title
+                 FROM games g
+                 JOIN user_favorites uf ON g.id = uf.game_id
+                 WHERE uf.created_at > ?
+                 GROUP BY g.id
+                 ORDER BY COUNT(uf.user_id) DESC
+                 LIMIT 10"
+            )
+            .bind(seven_days_ago.to_rfc3339())
+            .fetch_all(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            // If less than 10, fill with random games
+            if games.len() < 10 {
+                let mut result = games;
+                let needed = 10 - result.len();
+                let random_games: Vec<db::Game> = sqlx::query_as(
+                    "SELECT id, title, source, file_size, magnet_link, genres, company, original_size,
+                     thumbnail_url, screenshots, source_url, post_date, search_title
+                     FROM games ORDER BY RANDOM() LIMIT ?"
+                )
+                .bind(needed as i64)
+                .fetch_all(&state.db)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                result.extend(random_games);
+                result
+            } else {
+                games
+            }
+        },
+        "top_week" => {
+            // Most downloaded this week (using downloads table)
+            let seven_days_ago = chrono::Utc::now() - chrono::Duration::days(7);
+            let games: Vec<db::Game> = sqlx::query_as(
+                "SELECT DISTINCT g.id, g.title, g.source, g.file_size, g.magnet_link, g.genres, g.company,
+                 g.original_size, g.thumbnail_url, g.screenshots, g.source_url, g.post_date, g.search_title
+                 FROM games g
+                 JOIN downloads d ON g.id = d.game_id
+                 WHERE d.created_at > ?
+                 GROUP BY g.id
+                 ORDER BY COUNT(d.id) DESC
+                 LIMIT 10"
+            )
+            .bind(seven_days_ago.to_rfc3339())
+            .fetch_all(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            if games.len() < 10 {
+                let mut result = games;
+                let needed = 10 - result.len();
+                let random_games: Vec<db::Game> = sqlx::query_as(
+                    "SELECT id, title, source, file_size, magnet_link, genres, company, original_size,
+                     thumbnail_url, screenshots, source_url, post_date, search_title
+                     FROM games ORDER BY RANDOM() LIMIT ?"
+                )
+                .bind(needed as i64)
+                .fetch_all(&state.db)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                result.extend(random_games);
+                result
+            } else {
+                games
+            }
+        },
+        "to_beat" => {
+            // Small games (<10GB) with high favorites
+            sqlx::query_as(
+                "SELECT g.id, g.title, g.source, g.file_size, g.magnet_link, g.genres, g.company,
+                 g.original_size, g.thumbnail_url, g.screenshots, g.source_url, g.post_date, g.search_title
+                 FROM games g
+                 LEFT JOIN user_favorites uf ON g.id = uf.game_id
+                 WHERE g.file_size LIKE '%GB'
+                 AND CAST(REPLACE(REPLACE(g.file_size, ' GB', ''), ',', '.') AS REAL) < 10
+                 GROUP BY g.id
+                 ORDER BY COUNT(uf.user_id) DESC, RANDOM()
+                 LIMIT 10"
+            )
+            .fetch_all(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        },
+        "surprise" => {
+            // Random selection
+            sqlx::query_as(
+                "SELECT id, title, source, file_size, magnet_link, genres, company, original_size,
+                 thumbnail_url, screenshots, source_url, post_date, search_title
+                 FROM games ORDER BY RANDOM() LIMIT 10"
+            )
+            .fetch_all(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        },
+        _ => {
+            // Default to random
+            sqlx::query_as(
+                "SELECT id, title, source, file_size, magnet_link, genres, company, original_size,
+                 thumbnail_url, screenshots, source_url, post_date, search_title
+                 FROM games ORDER BY RANDOM() LIMIT 10"
+            )
+            .fetch_all(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        }
+    };
+
+    Ok(Json(games))
 }
 
 // ─── Random Game ───
@@ -1089,16 +1391,80 @@ async fn rescrape(
                     match db::replace_all_games(&db, game_inserts).await {
                         Ok(count) => {
                             println!("Successfully inserted {} games", count);
+
+                            // Notify users who have new games notifications enabled
+                            if count > 0 {
+                                let users_result: Result<Vec<(i64,)>, _> = sqlx::query_as(
+                                    "SELECT user_id FROM user_settings WHERE notify_new_games = 1"
+                                )
+                                .fetch_all(&db)
+                                .await;
+
+                                if let Ok(users) = users_result {
+                                    for (user_id,) in users {
+                                        let _ = db::create_notification(
+                                            &db,
+                                            user_id,
+                                            "new_games",
+                                            "New Games Available",
+                                            &format!("{} new games have been added to the library!", count),
+                                        ).await;
+                                    }
+                                }
+                            }
+
                             format!("Successfully scraped and inserted {} games", count)
                         }
                         Err(e) => {
                             eprintln!("Error inserting games: {}", e);
-                            format!("Scrape succeeded but database insert failed: {}", e)
+                            let error_msg = format!("Scrape succeeded but database insert failed: {}", e);
+
+                            // Notify users with error notifications enabled
+                            let users_result: Result<Vec<(i64,)>, _> = sqlx::query_as(
+                                "SELECT user_id FROM user_settings WHERE notify_errors = 1"
+                            )
+                            .fetch_all(&db)
+                            .await;
+
+                            if let Ok(users) = users_result {
+                                for (user_id,) in users {
+                                    let _ = db::create_notification(
+                                        &db,
+                                        user_id,
+                                        "scrape_error",
+                                        "Scrape Error",
+                                        &format!("Database insert failed: {}", e),
+                                    ).await;
+                                }
+                            }
+
+                            error_msg
                         }
                     }
                 }
             } else {
-                "No games were scraped from any source".to_string()
+                let error_msg = "No games were scraped from any source".to_string();
+
+                // Notify users with error notifications enabled about scrape failure
+                let users_result: Result<Vec<(i64,)>, _> = sqlx::query_as(
+                    "SELECT user_id FROM user_settings WHERE notify_errors = 1"
+                )
+                .fetch_all(&db)
+                .await;
+
+                if let Ok(users) = users_result {
+                    for (user_id,) in users {
+                        let _ = db::create_notification(
+                            &db,
+                            user_id,
+                            "scrape_error",
+                            "Scrape Failed",
+                            "No games were scraped from any source. Check scraper configuration.",
+                        ).await;
+                    }
+                }
+
+                error_msg
             };
 
             let mut status = scrape_status.write().await;
@@ -1547,7 +1913,13 @@ fn mask_key(key: &str) -> String {
 
 async fn get_settings(
     State(state): State<AppState>,
-) -> Json<SettingsResponse> {
+    headers: HeaderMap,
+) -> Result<Json<SettingsResponse>, StatusCode> {
+    // Get current user
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    // Get global settings (API keys)
     let pairs = db::get_all_settings(&state.db).await.unwrap_or_default();
     let mut settings = std::collections::HashMap::new();
 
@@ -1565,47 +1937,127 @@ async fn get_settings(
         }
     }
 
-    Json(SettingsResponse {
+    // Get user-specific settings
+    let user_settings = db::get_user_settings(&state.db, user.id)
+        .await
+        .unwrap_or_else(|_| db::UserSettings {
+            user_id: user.id,
+            theme: Some("dark".to_string()),
+            notifications_enabled: Some(true),
+            auto_download: Some(false),
+            download_path: None,
+            scraper_fitgirl_enabled: Some(true),
+            scraper_steamrip_enabled: Some(true),
+            notify_download_complete: Some(true),
+            notify_new_games: Some(false),
+            notify_errors: Some(true),
+        });
+
+    settings.insert("theme".to_string(), user_settings.theme.unwrap_or_else(|| "dark".to_string()));
+    settings.insert("notifications_enabled".to_string(), user_settings.notifications_enabled.unwrap_or(true).to_string());
+    settings.insert("auto_download".to_string(), user_settings.auto_download.unwrap_or(false).to_string());
+    settings.insert("download_path".to_string(), user_settings.download_path.unwrap_or_default());
+    settings.insert("scraper_fitgirl_enabled".to_string(), user_settings.scraper_fitgirl_enabled.unwrap_or(true).to_string());
+    settings.insert("scraper_steamrip_enabled".to_string(), user_settings.scraper_steamrip_enabled.unwrap_or(true).to_string());
+    settings.insert("notify_download_complete".to_string(), user_settings.notify_download_complete.unwrap_or(true).to_string());
+    settings.insert("notify_new_games".to_string(), user_settings.notify_new_games.unwrap_or(false).to_string());
+    settings.insert("notify_errors".to_string(), user_settings.notify_errors.unwrap_or(true).to_string());
+
+    Ok(Json(SettingsResponse {
         success: true,
         settings,
-    })
+    }))
 }
 
 async fn save_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<SettingsPayload>,
 ) -> Result<Json<ApiResponse>, (StatusCode, Json<ApiResponse>)> {
-    for (key, value) in &payload.settings {
-        if !ALLOWED_SETTINGS.contains(&key.as_str()) {
-            return Err((StatusCode::BAD_REQUEST, Json(ApiResponse {
-                success: false,
-                message: format!("Unknown setting: {}", key),
-                downloads: None,
-                download_id: None,
-            })));
-        }
+    // Get current user
+    let user = get_current_user(&state.db, &headers).await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(ApiResponse {
+            success: false, message: e, downloads: None, download_id: None,
+        })))?;
 
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            db::delete_setting(&state.db, key).await.map_err(|e| {
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
+    // Separate global settings (API keys) from user settings
+    let mut user_settings = db::UserSettings {
+        user_id: user.id,
+        theme: None,
+        notifications_enabled: None,
+        auto_download: None,
+        download_path: None,
+        scraper_fitgirl_enabled: None,
+        scraper_steamrip_enabled: None,
+        notify_download_complete: None,
+        notify_new_games: None,
+        notify_errors: None,
+    };
+
+    for (key, value) in &payload.settings {
+        match key.as_str() {
+            // Global settings (API keys)
+            "rawg_api_key" | "rd_api_key" => {
+                if !ALLOWED_SETTINGS.contains(&key.as_str()) {
+                    return Err((StatusCode::BAD_REQUEST, Json(ApiResponse {
+                        success: false,
+                        message: format!("Unknown setting: {}", key),
+                        downloads: None,
+                        download_id: None,
+                    })));
+                }
+
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    db::delete_setting(&state.db, key).await.map_err(|e| {
+                        (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
+                            success: false,
+                            message: format!("Failed to delete setting: {}", e),
+                            downloads: None,
+                            download_id: None,
+                        }))
+                    })?;
+                } else {
+                    db::set_setting(&state.db, key, trimmed).await.map_err(|e| {
+                        (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
+                            success: false,
+                            message: format!("Failed to save setting: {}", e),
+                            downloads: None,
+                            download_id: None,
+                        }))
+                    })?;
+                }
+            },
+            // User-specific settings
+            "theme" => user_settings.theme = Some(value.clone()),
+            "notifications_enabled" => user_settings.notifications_enabled = value.parse().ok(),
+            "auto_download" => user_settings.auto_download = value.parse().ok(),
+            "download_path" => user_settings.download_path = Some(value.clone()),
+            "scraper_fitgirl_enabled" => user_settings.scraper_fitgirl_enabled = value.parse().ok(),
+            "scraper_steamrip_enabled" => user_settings.scraper_steamrip_enabled = value.parse().ok(),
+            "notify_download_complete" => user_settings.notify_download_complete = value.parse().ok(),
+            "notify_new_games" => user_settings.notify_new_games = value.parse().ok(),
+            "notify_errors" => user_settings.notify_errors = value.parse().ok(),
+            _ => {
+                return Err((StatusCode::BAD_REQUEST, Json(ApiResponse {
                     success: false,
-                    message: format!("Failed to delete setting: {}", e),
+                    message: format!("Unknown setting: {}", key),
                     downloads: None,
                     download_id: None,
-                }))
-            })?;
-        } else {
-            db::set_setting(&state.db, key, trimmed).await.map_err(|e| {
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
-                    success: false,
-                    message: format!("Failed to save setting: {}", e),
-                    downloads: None,
-                    download_id: None,
-                }))
-            })?;
+                })));
+            }
         }
     }
+
+    // Save user settings
+    db::update_user_settings(&state.db, user.id, &user_settings).await.map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse {
+            success: false,
+            message: format!("Failed to save user settings: {}", e),
+            downloads: None,
+            download_id: None,
+        }))
+    })?;
 
     Ok(Json(ApiResponse {
         success: true,

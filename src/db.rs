@@ -353,6 +353,70 @@ pub async fn init_db(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
     .execute(&pool)
     .await?;
 
+    // Add new columns for enhanced settings (migrations for existing DBs)
+    let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN download_path TEXT")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN scraper_fitgirl_enabled BOOLEAN DEFAULT 1")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN scraper_steamrip_enabled BOOLEAN DEFAULT 1")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN notify_download_complete BOOLEAN DEFAULT 1")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN notify_new_games BOOLEAN DEFAULT 0")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN notify_errors BOOLEAN DEFAULT 1")
+        .execute(&pool)
+        .await;
+
+    // Game tags table for filtering
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS game_tags (
+            game_id INTEGER NOT NULL,
+            tag TEXT NOT NULL,
+            PRIMARY KEY (game_id, tag),
+            FOREIGN KEY (game_id) REFERENCES games(id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_game_tags_tag ON game_tags(tag)")
+        .execute(&pool)
+        .await?;
+
+    // Notifications table
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            read BOOLEAN DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id)")
+        .execute(&pool)
+        .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read)")
+        .execute(&pool)
+        .await?;
+
     // Create clients table for tracking Windows client agents
     // Add user_id to link clients to users
     sqlx::query(
@@ -1558,4 +1622,247 @@ pub async fn get_user_clients(
     .bind(user_id)
     .fetch_all(pool)
     .await
+}
+
+// ─── Game Tags ───
+
+/// Get all tags with their counts
+pub async fn get_all_tags(pool: &SqlitePool) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT tag, COUNT(*) as count FROM game_tags GROUP BY tag ORDER BY count DESC LIMIT 100"
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Add a tag to a game
+pub async fn add_game_tag(
+    pool: &SqlitePool,
+    game_id: i64,
+    tag: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO game_tags (game_id, tag) VALUES (?, ?)"
+    )
+    .bind(game_id)
+    .bind(tag)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Remove a tag from a game
+pub async fn remove_game_tag(
+    pool: &SqlitePool,
+    game_id: i64,
+    tag: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM game_tags WHERE game_id = ? AND tag = ?")
+        .bind(game_id)
+        .bind(tag)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Get tags for a specific game
+pub async fn get_game_tags(
+    pool: &SqlitePool,
+    game_id: i64,
+) -> Result<Vec<String>, sqlx::Error> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT tag FROM game_tags WHERE game_id = ? ORDER BY tag"
+    )
+    .bind(game_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(tag,)| tag).collect())
+}
+
+// ─── User Settings ───
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct UserSettings {
+    pub user_id: i64,
+    pub theme: Option<String>,
+    pub notifications_enabled: Option<bool>,
+    pub auto_download: Option<bool>,
+    pub download_path: Option<String>,
+    pub scraper_fitgirl_enabled: Option<bool>,
+    pub scraper_steamrip_enabled: Option<bool>,
+    pub notify_download_complete: Option<bool>,
+    pub notify_new_games: Option<bool>,
+    pub notify_errors: Option<bool>,
+}
+
+/// Get user settings
+pub async fn get_user_settings(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<UserSettings, sqlx::Error> {
+    // Try to get existing settings
+    let settings: Option<UserSettings> = sqlx::query_as(
+        "SELECT * FROM user_settings WHERE user_id = ?"
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    // If no settings exist, create default settings
+    if let Some(settings) = settings {
+        Ok(settings)
+    } else {
+        sqlx::query(
+            "INSERT INTO user_settings (user_id) VALUES (?)"
+        )
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+
+        // Fetch the newly created settings
+        sqlx::query_as(
+            "SELECT * FROM user_settings WHERE user_id = ?"
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+    }
+}
+
+/// Update user settings
+pub async fn update_user_settings(
+    pool: &SqlitePool,
+    user_id: i64,
+    settings: &UserSettings,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE user_settings SET
+            theme = COALESCE(?, theme),
+            notifications_enabled = COALESCE(?, notifications_enabled),
+            auto_download = COALESCE(?, auto_download),
+            download_path = COALESCE(?, download_path),
+            scraper_fitgirl_enabled = COALESCE(?, scraper_fitgirl_enabled),
+            scraper_steamrip_enabled = COALESCE(?, scraper_steamrip_enabled),
+            notify_download_complete = COALESCE(?, notify_download_complete),
+            notify_new_games = COALESCE(?, notify_new_games),
+            notify_errors = COALESCE(?, notify_errors)
+         WHERE user_id = ?"
+    )
+    .bind(&settings.theme)
+    .bind(settings.notifications_enabled)
+    .bind(settings.auto_download)
+    .bind(&settings.download_path)
+    .bind(settings.scraper_fitgirl_enabled)
+    .bind(settings.scraper_steamrip_enabled)
+    .bind(settings.notify_download_complete)
+    .bind(settings.notify_new_games)
+    .bind(settings.notify_errors)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+// ─── Notifications ───
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Notification {
+    pub id: i64,
+    pub user_id: i64,
+    #[serde(rename = "type")]
+    pub notification_type: String,
+    pub title: String,
+    pub message: String,
+    pub read: bool,
+    pub created_at: String,
+}
+
+/// Create a notification
+pub async fn create_notification(
+    pool: &SqlitePool,
+    user_id: i64,
+    notification_type: &str,
+    title: &str,
+    message: &str,
+) -> Result<i64, sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let result = sqlx::query(
+        "INSERT INTO notifications (user_id, type, title, message, created_at) VALUES (?, ?, ?, ?, ?)"
+    )
+    .bind(user_id)
+    .bind(notification_type)
+    .bind(title)
+    .bind(message)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+
+    Ok(result.last_insert_rowid())
+}
+
+/// Get notifications for a user (last 50)
+pub async fn get_user_notifications(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<Vec<Notification>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, user_id, type as notification_type, title, message, read, created_at
+         FROM notifications
+         WHERE user_id = ?
+         ORDER BY created_at DESC
+         LIMIT 50"
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+}
+
+/// Get unread notification count for a user
+pub async fn get_unread_notification_count(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<i64, sqlx::Error> {
+    let (count,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0"
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(count)
+}
+
+/// Mark a notification as read
+pub async fn mark_notification_read(
+    pool: &SqlitePool,
+    notification_id: i64,
+    user_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?"
+    )
+    .bind(notification_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Mark all notifications as read for a user
+pub async fn mark_all_notifications_read(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE notifications SET read = 1 WHERE user_id = ? AND read = 0"
+    )
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }

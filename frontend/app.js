@@ -19,6 +19,7 @@ let favoriteIds = new Set();
 let showingFavorites = false;
 let selectedSource = 'all';
 let currentUser = null; // Stores current authenticated user
+let notificationPollInterval = null;
 
 // ─── Authentication ───
 
@@ -89,6 +90,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadGames();
     loadGenres();
     loadFavoriteIds();
+    // Start notification polling
+    startNotificationPolling();
     // Check if a scrape is already running (e.g. page refresh during scrape)
     checkScrapeStatus().then(() => {
         const container = document.getElementById('scrapeProgressContainer');
@@ -159,6 +162,13 @@ function showView(view) {
     document.getElementById('navDownloads').classList.toggle('active', view === 'downloads');
     document.getElementById('navClients').classList.toggle('active', view === 'clients');
     document.getElementById('navSystemHealth').classList.toggle('active', view === 'systemHealth');
+
+    if (view === 'home') {
+        // Load featured games carousel if not already loaded
+        if (featuredGames.length === 0) {
+            loadFeaturedCategory('hot');
+        }
+    }
 
     if (view === 'downloads') {
         loadDownloads();
@@ -1492,10 +1502,29 @@ async function loadFavoritesView() {
         document.getElementById('statsText').textContent = `${games.length} favorite${games.length !== 1 ? 's' : ''}`;
         document.getElementById('pagination').innerHTML = '';
 
+        const emptyState = document.getElementById('emptyState');
         if (games.length === 0) {
-            document.getElementById('emptyState').classList.remove('hidden');
+            // Show enhanced favorites empty state
+            emptyState.innerHTML = `
+                <div class="empty-icon">⭐</div>
+                <h3 class="empty-title">No favorites yet</h3>
+                <p class="empty-subtitle">You haven't added any games to your favorites. Browse the library and click the star icon on games you want to save.</p>
+                <div class="empty-action">
+                    <button onclick="showingFavorites=false;document.getElementById('favToggle').classList.remove('bg-yellow-700');showView('games')" class="btn btn-primary">Browse All Games</button>
+                </div>
+            `;
+            emptyState.classList.remove('hidden');
         } else {
-            document.getElementById('emptyState').classList.add('hidden');
+            // Restore default empty state HTML for when filters are applied
+            emptyState.innerHTML = `
+                <div class="empty-icon">🎮</div>
+                <h3 class="empty-title">No games found</h3>
+                <p class="empty-subtitle">We couldn't find any games matching your filters. Try adjusting your search or clear all filters to browse the full library.</p>
+                <div class="empty-action">
+                    <button onclick="clearFilters()" class="btn btn-primary">Clear Filters</button>
+                </div>
+            `;
+            emptyState.classList.add('hidden');
         }
     } catch (error) {
         showToast('Failed to load favorites', 'error');
@@ -1519,6 +1548,19 @@ async function randomGame() {
 
 // ─── Settings ───
 
+function switchSettingsTab(tabName) {
+    // Update active tab
+    document.querySelectorAll('.settings-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.tab === tabName);
+    });
+
+    // Show/hide panels
+    document.querySelectorAll('.settings-panel').forEach(panel => {
+        panel.classList.add('hidden');
+    });
+    document.getElementById(`settingsTab${tabName.charAt(0).toUpperCase() + tabName.slice(1)}`).classList.remove('hidden');
+}
+
 async function showSettingsModal() {
     document.getElementById('settingsModal').classList.remove('hidden');
 
@@ -1528,11 +1570,15 @@ async function showSettingsModal() {
     document.getElementById('rawgKeyStatus').textContent = 'Loading...';
     document.getElementById('rdKeyStatus').textContent = 'Loading...';
 
+    // Reset to first tab
+    switchSettingsTab('general');
+
     try {
         const response = await fetch(`${API_BASE}/settings`);
         const data = await response.json();
         const s = data.settings;
 
+        // API Keys
         if (s.rawg_api_key_set === 'true') {
             document.getElementById('rawgKeyStatus').innerHTML = `<span style="color:var(--green)">✓ Set</span> <span style="color:var(--text-dim)">(${s.rawg_api_key_masked})</span> — leave blank to keep current`;
         } else {
@@ -1544,6 +1590,18 @@ async function showSettingsModal() {
         } else {
             document.getElementById('rdKeyStatus').innerHTML = '<span style="color:var(--gold)">Not set</span> — downloads won\'t work without this';
         }
+
+        // User settings
+        document.getElementById('settingDownloadPath').value = s.download_path || '';
+        document.getElementById('settingTheme').value = s.theme || 'dark';
+        document.getElementById('settingScraperFitgirl').checked = s.scraper_fitgirl_enabled !== 'false';
+        document.getElementById('settingScraperSteamrip').checked = s.scraper_steamrip_enabled !== 'false';
+        document.getElementById('settingNotifyDownloadComplete').checked = s.notify_download_complete !== 'false';
+        document.getElementById('settingNotifyNewGames').checked = s.notify_new_games === 'true';
+        document.getElementById('settingNotifyErrors').checked = s.notify_errors !== 'false';
+
+        // Check notification permission status
+        updateNotificationStatus();
     } catch (error) {
         document.getElementById('rawgKeyStatus').textContent = 'Failed to load settings';
         document.getElementById('rdKeyStatus').textContent = 'Failed to load settings';
@@ -1560,19 +1618,22 @@ function toggleKeyVisibility(inputId) {
 }
 
 async function saveSettings() {
+    const settings = {};
+
+    // API Keys (only if entered)
     const rawgKey = document.getElementById('settingRawgKey').value.trim();
     const rdKey = document.getElementById('settingRdKey').value.trim();
-
-    const settings = {};
-    // Only send keys that were actually entered (non-empty means update)
     if (rawgKey) settings.rawg_api_key = rawgKey;
     if (rdKey) settings.rd_api_key = rdKey;
 
-    if (Object.keys(settings).length === 0) {
-        showToast('No changes to save', 'info');
-        hideSettingsModal();
-        return;
-    }
+    // User settings
+    settings.download_path = document.getElementById('settingDownloadPath').value.trim();
+    settings.theme = document.getElementById('settingTheme').value;
+    settings.scraper_fitgirl_enabled = document.getElementById('settingScraperFitgirl').checked.toString();
+    settings.scraper_steamrip_enabled = document.getElementById('settingScraperSteamrip').checked.toString();
+    settings.notify_download_complete = document.getElementById('settingNotifyDownloadComplete').checked.toString();
+    settings.notify_new_games = document.getElementById('settingNotifyNewGames').checked.toString();
+    settings.notify_errors = document.getElementById('settingNotifyErrors').checked.toString();
 
     try {
         const response = await fetch(`${API_BASE}/settings`, {
@@ -1590,6 +1651,60 @@ async function saveSettings() {
         }
     } catch (error) {
         showToast('Failed to save settings', 'error');
+    }
+}
+
+async function requestNotificationPermission() {
+    if (!('Notification' in window)) {
+        showToast('Browser does not support notifications', 'error');
+        return;
+    }
+
+    try {
+        const permission = await Notification.requestPermission();
+        updateNotificationStatus();
+
+        if (permission === 'granted') {
+            showToast('Browser notifications enabled!', 'success');
+            // Show a test notification
+            new Notification('Repack Browser', {
+                body: 'Notifications are now enabled!',
+                icon: '/favicon.ico'
+            });
+        } else if (permission === 'denied') {
+            showToast('Notifications blocked. Please enable in browser settings.', 'error');
+        }
+    } catch (error) {
+        showToast('Failed to request notification permission', 'error');
+    }
+}
+
+function updateNotificationStatus() {
+    const statusEl = document.getElementById('notificationStatus');
+    const btnEl = document.getElementById('requestNotificationBtn');
+
+    if (!('Notification' in window)) {
+        statusEl.innerHTML = '<span style="color:var(--red);">Browser does not support notifications</span>';
+        btnEl.disabled = true;
+        return;
+    }
+
+    const permission = Notification.permission;
+    if (permission === 'granted') {
+        statusEl.innerHTML = '<span style="color:var(--green);">✓ Notifications enabled</span>';
+        btnEl.textContent = 'Test Notification';
+        btnEl.onclick = () => {
+            new Notification('Repack Browser', {
+                body: 'Test notification',
+                icon: '/favicon.ico'
+            });
+        };
+    } else if (permission === 'denied') {
+        statusEl.innerHTML = '<span style="color:var(--red);">Notifications blocked. Enable in browser settings.</span>';
+        btnEl.disabled = true;
+    } else {
+        statusEl.innerHTML = '<span style="color:var(--text-dim);">Click button to enable</span>';
+        btnEl.textContent = 'Enable Browser Notifications';
     }
 }
 
@@ -1898,5 +2013,434 @@ async function showPreInstallCheck(gameId) {
 
 function hidePreInstallModal() {
     document.getElementById('preInstallModal').classList.add('hidden');
+}
+
+// ─── Right Sidebar (Genre/Tag Filtering) ───
+
+let sidebarGenres = [];
+let sidebarTags = [];
+let selectedSidebarGenres = new Set();
+let selectedSidebarTags = new Set();
+
+function toggleSidebar() {
+    const sidebar = document.getElementById('rightSidebar');
+    const toggle = document.getElementById('sidebarToggle');
+    const isOpen = sidebar.classList.toggle('open');
+    toggle.textContent = isOpen ? '✕' : '🔍';
+
+    // Load sidebar data on first open
+    if (isOpen && sidebarGenres.length === 0 && sidebarTags.length === 0) {
+        loadSidebarGenres();
+        loadSidebarTags();
+    }
+}
+
+async function loadSidebarGenres() {
+    try {
+        const response = await fetch(`${API_BASE}/games/genres`);
+        const data = await response.json();
+        sidebarGenres = data.genres || [];
+        renderSidebarGenres();
+    } catch (error) {
+        console.error('Failed to load sidebar genres:', error);
+        document.getElementById('genreFilterList').innerHTML = '<div style="text-align:center;padding:1rem;color:var(--red);font-size:0.75rem;">Failed to load</div>';
+    }
+}
+
+async function loadSidebarTags() {
+    try {
+        const response = await fetch(`${API_BASE}/games/tags`);
+        const data = await response.json();
+        sidebarTags = data.tags || [];
+        renderSidebarTags();
+    } catch (error) {
+        console.error('Failed to load sidebar tags:', error);
+        document.getElementById('tagFilterList').innerHTML = '<div style="text-align:center;padding:1rem;color:var(--red);font-size:0.75rem;">Failed to load</div>';
+    }
+}
+
+function renderSidebarGenres(filter = '') {
+    const container = document.getElementById('genreFilterList');
+    const filtered = filter
+        ? sidebarGenres.filter(g => g.name.toLowerCase().includes(filter.toLowerCase()))
+        : sidebarGenres;
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--text-dim);font-size:0.75rem;">No genres found</div>';
+        return;
+    }
+
+    container.innerHTML = filtered.map(genre => {
+        const isActive = selectedSidebarGenres.has(genre.name);
+        return `
+            <div class="filter-item ${isActive ? 'active' : ''}" onclick="toggleSidebarGenre('${escapeHtml(genre.name)}')">
+                <span>${escapeHtml(genre.name)}</span>
+                <span class="filter-count">${genre.count}</span>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderSidebarTags(filter = '') {
+    const container = document.getElementById('tagFilterList');
+    const filtered = filter
+        ? sidebarTags.filter(t => t.name.toLowerCase().includes(filter.toLowerCase()))
+        : sidebarTags;
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--text-dim);font-size:0.75rem;">No tags found</div>';
+        return;
+    }
+
+    container.innerHTML = filtered.map(tag => {
+        const isActive = selectedSidebarTags.has(tag.name);
+        return `
+            <div class="filter-item ${isActive ? 'active' : ''}" onclick="toggleSidebarTag('${escapeHtml(tag.name)}')">
+                <span>${escapeHtml(tag.name)}</span>
+                <span class="filter-count">${tag.count}</span>
+            </div>
+        `;
+    }).join('');
+}
+
+function filterSidebarGenres() {
+    const search = document.getElementById('genreSidebarSearch').value;
+    renderSidebarGenres(search);
+}
+
+function filterSidebarTags() {
+    const search = document.getElementById('tagSidebarSearch').value;
+    renderSidebarTags(search);
+}
+
+function toggleSidebarGenre(genre) {
+    if (selectedSidebarGenres.has(genre)) {
+        selectedSidebarGenres.delete(genre);
+    } else {
+        selectedSidebarGenres.add(genre);
+    }
+    renderSidebarGenres(document.getElementById('genreSidebarSearch').value);
+    applyMultiFilter();
+}
+
+function toggleSidebarTag(tag) {
+    if (selectedSidebarTags.has(tag)) {
+        selectedSidebarTags.delete(tag);
+    } else {
+        selectedSidebarTags.add(tag);
+    }
+    renderSidebarTags(document.getElementById('tagSidebarSearch').value);
+    applyMultiFilter();
+}
+
+function applyMultiFilter() {
+    // For now, we'll apply genre filter from sidebar
+    // Tag filtering will be added once we have tags in the database
+    if (selectedSidebarGenres.size > 0) {
+        // Use the first selected genre (we can enhance this later for multi-select)
+        const firstGenre = Array.from(selectedSidebarGenres)[0];
+        document.getElementById('genreSelect').value = firstGenre;
+    } else {
+        document.getElementById('genreSelect').value = '';
+    }
+
+    currentPage = 1;
+    currentGames = [];
+    loadGames();
+}
+
+// ─── Featured Games Carousel ───
+
+let featuredGames = [];
+let carouselIndex = 0;
+let currentCategory = 'hot';
+
+async function loadFeaturedCategory(category) {
+    currentCategory = category;
+    carouselIndex = 0;
+
+    // Update active tab
+    document.querySelectorAll('.carousel-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.category === category);
+    });
+
+    // Show loading state
+    document.getElementById('carouselMain').innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);">
+            <div class="spinner" style="width:48px;height:48px;border-width:4px;"></div>
+        </div>
+    `;
+    document.getElementById('carouselThumbs').innerHTML = '';
+
+    try {
+        const response = await fetch(`${API_BASE}/games/featured?category=${category}`);
+        if (!response.ok) throw new Error('Failed to load featured games');
+
+        featuredGames = await response.json();
+
+        if (featuredGames.length === 0) {
+            document.getElementById('carouselMain').innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);font-size:0.875rem;">
+                    No games available
+                </div>
+            `;
+            return;
+        }
+
+        renderCarousel();
+        renderCarouselThumbs();
+    } catch (error) {
+        console.error('Failed to load featured games:', error);
+        document.getElementById('carouselMain').innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--red);font-size:0.875rem;">
+                Failed to load featured games
+            </div>
+        `;
+    }
+}
+
+function renderCarousel() {
+    if (featuredGames.length === 0) return;
+
+    const game = featuredGames[carouselIndex];
+    const hasThumb = game.thumbnail_url && game.thumbnail_url.length > 0;
+
+    const genres = game.genres
+        ? game.genres.split(',').slice(0, 5).map(g =>
+            `<span class="carousel-genre-tag">${escapeHtml(g.trim())}</span>`
+        ).join('')
+        : '';
+
+    const imgHtml = hasThumb
+        ? `<img src="${escapeHtml(game.thumbnail_url)}" alt="${escapeHtml(game.title)}">`
+        : `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:6rem;color:var(--text-dim);opacity:0.2;">🎮</div>`;
+
+    document.getElementById('carouselMain').innerHTML = `
+        ${imgHtml}
+        ${featuredGames.length > 1 ? `
+            <button class="carousel-nav carousel-nav-prev" onclick="event.stopPropagation();prevCarousel()">‹</button>
+            <button class="carousel-nav carousel-nav-next" onclick="event.stopPropagation();nextCarousel()">›</button>
+        ` : ''}
+        <div class="carousel-info">
+            <h2 class="carousel-title">${escapeHtml(game.title)}</h2>
+            <div class="carousel-meta">
+                <span>${escapeHtml(game.file_size)}</span>
+                ${game.company ? `<span>•</span><span>${escapeHtml(game.company)}</span>` : ''}
+                ${game.post_date ? `<span>•</span><span>${game.post_date.substring(0, 4)}</span>` : ''}
+            </div>
+            ${genres ? `<div class="carousel-genres">${genres}</div>` : ''}
+            <div class="carousel-actions">
+                <button class="carousel-btn carousel-btn-primary" onclick="event.stopPropagation();showGameModal(${game.id})">
+                    View Details
+                </button>
+                <button class="carousel-btn carousel-btn-secondary" onclick="event.stopPropagation();queueDownload(${game.id})">
+                    Download
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function renderCarouselThumbs() {
+    const container = document.getElementById('carouselThumbs');
+
+    container.innerHTML = featuredGames.map((game, index) => {
+        const hasThumb = game.thumbnail_url && game.thumbnail_url.length > 0;
+        const thumbContent = hasThumb
+            ? `<img src="${escapeHtml(game.thumbnail_url)}" alt="${escapeHtml(game.title)}">`
+            : `<div style="display:flex;align-items:center;justify-content:center;height:100%;background:var(--bg-deep);color:var(--text-dim);font-size:1.5rem;">🎮</div>`;
+
+        return `
+            <div class="carousel-thumb ${index === carouselIndex ? 'active' : ''}"
+                 onclick="goToCarouselIndex(${index})"
+                 data-index="${index}">
+                ${thumbContent}
+            </div>
+        `;
+    }).join('');
+}
+
+function nextCarousel() {
+    carouselIndex = (carouselIndex + 1) % featuredGames.length;
+    renderCarousel();
+    updateCarouselThumbs();
+}
+
+function prevCarousel() {
+    carouselIndex = (carouselIndex - 1 + featuredGames.length) % featuredGames.length;
+    renderCarousel();
+    updateCarouselThumbs();
+}
+
+function goToCarouselIndex(index) {
+    carouselIndex = index;
+    renderCarousel();
+    updateCarouselThumbs();
+}
+
+function updateCarouselThumbs() {
+    document.querySelectorAll('.carousel-thumb').forEach((thumb, index) => {
+        thumb.classList.toggle('active', index === carouselIndex);
+    });
+}
+
+function carouselGameClick() {
+    if (featuredGames.length > 0) {
+        showGameModal(featuredGames[carouselIndex].id);
+    }
+}
+
+// ─── Notifications ───
+
+let notificationPanelOpen = false;
+
+function toggleNotificationPanel() {
+    const panel = document.getElementById('notificationPanel');
+    notificationPanelOpen = !notificationPanelOpen;
+
+    if (notificationPanelOpen) {
+        panel.classList.remove('hidden');
+        loadNotifications();
+    } else {
+        panel.classList.add('hidden');
+    }
+}
+
+// Close notification panel when clicking outside
+document.addEventListener('click', (e) => {
+    const panel = document.getElementById('notificationPanel');
+    const btn = document.getElementById('notificationBtn');
+
+    if (notificationPanelOpen && !panel.contains(e.target) && !btn.contains(e.target)) {
+        panel.classList.add('hidden');
+        notificationPanelOpen = false;
+    }
+});
+
+async function loadNotifications() {
+    try {
+        const response = await fetch(`${API_BASE}/notifications`);
+        const notifications = await response.json();
+
+        const container = document.getElementById('notificationList');
+
+        if (notifications.length === 0) {
+            container.innerHTML = `
+                <div style="text-align:center;padding:2rem;color:var(--text-dim);font-size:0.85rem;">
+                    <div style="font-size:2rem;margin-bottom:0.5rem;opacity:0.5;">🔔</div>
+                    <div>No notifications yet</div>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = notifications.map(notif => {
+            const isUnread = !notif.read;
+            const time = formatRelativeTime(notif.created_at);
+
+            return `
+                <div class="notification-item ${isUnread ? 'unread' : ''}" onclick="markNotificationRead(${notif.id})">
+                    <div class="notification-title">${escapeHtml(notif.title)}</div>
+                    <div class="notification-message">${escapeHtml(notif.message)}</div>
+                    <div class="notification-time">${time}</div>
+                </div>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('Failed to load notifications:', error);
+        document.getElementById('notificationList').innerHTML = `
+            <div style="text-align:center;padding:2rem;color:var(--red);font-size:0.85rem;">
+                Failed to load notifications
+            </div>
+        `;
+    }
+}
+
+async function markNotificationRead(id) {
+    try {
+        await fetch(`${API_BASE}/notifications/${id}/read`, { method: 'POST' });
+        loadNotifications();
+        updateNotificationBadge();
+    } catch (error) {
+        console.error('Failed to mark notification as read:', error);
+    }
+}
+
+async function markAllNotificationsRead() {
+    try {
+        await fetch(`${API_BASE}/notifications/read-all`, { method: 'POST' });
+        loadNotifications();
+        updateNotificationBadge();
+        showToast('All notifications marked as read', 'success');
+    } catch (error) {
+        console.error('Failed to mark all notifications as read:', error);
+        showToast('Failed to mark notifications as read', 'error');
+    }
+}
+
+async function updateNotificationBadge() {
+    try {
+        const response = await fetch(`${API_BASE}/notifications/count`);
+        const data = await response.json();
+        const count = data.count || 0;
+
+        const badge = document.getElementById('notificationBadge');
+        if (count > 0) {
+            badge.textContent = count > 99 ? '99+' : count;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    } catch (error) {
+        console.error('Failed to update notification badge:', error);
+    }
+}
+
+function startNotificationPolling() {
+    // Poll every 30 seconds
+    updateNotificationBadge();
+    notificationPollInterval = setInterval(updateNotificationBadge, 30000);
+}
+
+function stopNotificationPolling() {
+    if (notificationPollInterval) {
+        clearInterval(notificationPollInterval);
+        notificationPollInterval = null;
+    }
+}
+
+function formatRelativeTime(dateStr) {
+    try {
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffSecs = Math.floor(diffMs / 1000);
+        const diffMins = Math.floor(diffSecs / 60);
+        const diffHours = Math.floor(diffMins / 60);
+        const diffDays = Math.floor(diffHours / 24);
+
+        if (diffSecs < 60) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        return date.toLocaleDateString();
+    } catch {
+        return dateStr;
+    }
+}
+
+function showBrowserNotification(title, message) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+
+    try {
+        new Notification(title, {
+            body: message,
+            icon: '/favicon.ico',
+            badge: '/favicon.ico'
+        });
+    } catch (error) {
+        console.error('Failed to show browser notification:', error);
+    }
 }
 

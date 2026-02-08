@@ -196,6 +196,17 @@ impl ClientDownloadManager {
         download_id: i64,
         update: ProgressUpdate,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Get download info to find user_id and game_title
+        let download_info: Option<(i64, i64, String)> = sqlx::query_as(
+            "SELECT d.user_id, d.game_id, g.title
+             FROM downloads d
+             JOIN games g ON d.game_id = g.id
+             WHERE d.id = ?"
+        )
+        .bind(download_id)
+        .fetch_optional(&self.db)
+        .await?;
+
         // Update download status in database
         sqlx::query(
             "UPDATE downloads
@@ -219,6 +230,40 @@ impl ClientDownloadManager {
                 .bind(download_id)
                 .execute(&self.db)
                 .await?;
+
+            // Create notifications based on user settings
+            if let Some((user_id, _game_id, game_title)) = download_info {
+                if update.status == "completed" {
+                    // Check if user has download completion notifications enabled
+                    let settings = db::get_user_settings(&self.db, user_id).await.ok();
+                    if let Some(settings) = settings {
+                        if settings.notify_download_complete.unwrap_or(true) {
+                            let _ = db::create_notification(
+                                &self.db,
+                                user_id,
+                                "download_complete",
+                                "Download Complete",
+                                &format!("{} has finished downloading and is ready to play!", game_title),
+                            ).await;
+                        }
+                    }
+                } else if update.status == "failed" {
+                    // Check if user has error notifications enabled
+                    let settings = db::get_user_settings(&self.db, user_id).await.ok();
+                    if let Some(settings) = settings {
+                        if settings.notify_errors.unwrap_or(true) {
+                            let error_msg = update.error_message.as_deref().unwrap_or("Unknown error");
+                            let _ = db::create_notification(
+                                &self.db,
+                                user_id,
+                                "download_error",
+                                "Download Failed",
+                                &format!("{} failed to download: {}", game_title, error_msg),
+                            ).await;
+                        }
+                    }
+                }
+            }
         }
 
         Ok(())
