@@ -356,7 +356,7 @@ fn find_installer(dir: &Path) -> Result<PathBuf, String> {
 }
 
 async fn run_silent_install(installer_path: &Path) -> Result<(), String> {
-    info!("Running silent installation: {:?}", installer_path);
+    info!("Running silent installation with elevation: {:?}", installer_path);
 
     // Determine install directory (same parent as installer)
     let install_dir = installer_path
@@ -365,24 +365,106 @@ async fn run_silent_install(installer_path: &Path) -> Result<(), String> {
         .to_string_lossy()
         .to_string();
 
-    // FitGirl repack silent install flags (InnoSetup)
-    let output = tokio::process::Command::new(installer_path)
-        .arg("/VERYSILENT")
-        .arg(format!("/DIR={}", install_dir))
-        .arg("/LANG=english")
-        .arg("/NOCANCEL")
-        .arg("/NORESTART")
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run installer: {}", e))?;
+    // Build command line arguments for FitGirl installer (InnoSetup)
+    let args = format!(
+        "/VERYSILENT /DIR=\"{}\" /LANG=english /NOCANCEL /NORESTART",
+        install_dir
+    );
 
-    if output.status.success() {
-        Ok(())
+    // Run installer with UAC elevation on Windows
+    #[cfg(windows)]
+    {
+        run_elevated_process(installer_path, &args).await?;
+    }
+
+    #[cfg(not(windows))]
+    {
+        return Err("Installation is only supported on Windows".to_string());
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+async fn run_elevated_process(exe_path: &Path, args: &str) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr;
+    use winapi::um::shellapi::ShellExecuteW;
+    use winapi::um::winuser::SW_SHOW;
+
+    let exe_path_str = exe_path.to_string_lossy().to_string();
+
+    // Convert strings to wide (UTF-16) for Windows API
+    let operation: Vec<u16> = OsStr::new("runas").encode_wide().chain(once(0)).collect();
+    let file: Vec<u16> = OsStr::new(&exe_path_str).encode_wide().chain(once(0)).collect();
+    let parameters: Vec<u16> = OsStr::new(args).encode_wide().chain(once(0)).collect();
+
+    // Run in a blocking task since ShellExecuteW is synchronous
+    let result = tokio::task::spawn_blocking(move || {
+        unsafe {
+            let result = ShellExecuteW(
+                ptr::null_mut(),           // hwnd
+                operation.as_ptr(),         // lpOperation - "runas" for elevation
+                file.as_ptr(),              // lpFile - executable path
+                parameters.as_ptr(),        // lpParameters - command line args
+                ptr::null(),                // lpDirectory - use current
+                SW_SHOW,                    // nShowCmd - show window
+            );
+
+            // ShellExecuteW returns a value > 32 if successful
+            if result as usize > 32 {
+                Ok(())
+            } else {
+                Err(format!("ShellExecuteW failed with code: {}", result as i32))
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("Failed to spawn elevated process task: {}", e))?;
+
+    result?;
+
+    // Wait for installation to complete
+    // Note: ShellExecuteW doesn't wait for the process to complete, so we need to poll
+    info!("Installer launched with elevation. Waiting for completion...");
+
+    // Wait for installer process to finish by checking if setup.exe is still running
+    let exe_name = exe_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("setup.exe");
+
+    // Poll every 5 seconds to check if installer is still running
+    for _ in 0..360 { // Max 30 minutes (360 * 5 seconds)
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+        // Check if installer process is still running
+        if !is_process_running(exe_name) {
+            info!("Installer process completed");
+            return Ok(());
+        }
+    }
+
+    Err("Installation timeout - process did not complete within 30 minutes".to_string())
+}
+
+#[cfg(windows)]
+fn is_process_running(process_name: &str) -> bool {
+    use std::process::Command;
+
+    // Use tasklist to check if process is running
+    let output = Command::new("tasklist")
+        .arg("/FI")
+        .arg(format!("IMAGENAME eq {}", process_name))
+        .output();
+
+    if let Ok(output) = output {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout.contains(process_name)
     } else {
-        Err(format!(
-            "Installer exited with code: {:?}",
-            output.status.code()
-        ))
+        false
     }
 }
 
