@@ -224,8 +224,20 @@ async fn process_single_download(
     // Sanitize the game title for use as a directory name
     let sanitized_game_title = sanitize_filename(&game_title);
     let extract_dir = output_dir.join(&sanitized_game_title);
-    std::fs::create_dir_all(&extract_dir)?;
+
+    // Create extraction directory with error handling
+    std::fs::create_dir_all(&extract_dir)
+        .map_err(|e| format!("Failed to create extraction directory {:?}: {} (os error {})",
+            extract_dir, e, e.raw_os_error().unwrap_or(-1)))?;
+
     info!("Extracting to directory: {:?}", extract_dir);
+
+    // Verify we can write to the directory
+    let test_file = extract_dir.join(".write_test");
+    std::fs::write(&test_file, "test")
+        .map_err(|e| format!("Cannot write to extraction directory {:?}: {} (os error {})",
+            extract_dir, e, e.raw_os_error().unwrap_or(-1)))?;
+    let _ = std::fs::remove_file(&test_file);
 
     for file_path in &downloaded_files {
         if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
@@ -394,7 +406,27 @@ async fn run_elevated_process(exe_path: &Path, args: &str) -> Result<(), String>
     use winapi::um::shellapi::ShellExecuteW;
     use winapi::um::winuser::SW_SHOW;
 
+    // Verify the installer file exists and is readable
+    if !exe_path.exists() {
+        return Err(format!("Installer not found: {:?}", exe_path));
+    }
+
+    // Check if we can read the file
+    match std::fs::metadata(exe_path) {
+        Ok(metadata) => {
+            info!("Installer file size: {} bytes", metadata.len());
+            if metadata.len() == 0 {
+                return Err("Installer file is empty".to_string());
+            }
+        }
+        Err(e) => {
+            return Err(format!("Cannot access installer: {}", e));
+        }
+    }
+
     let exe_path_str = exe_path.to_string_lossy().to_string();
+    info!("Launching installer with elevation: {}", exe_path_str);
+    info!("Installer arguments: {}", args);
 
     // Convert strings to wide (UTF-16) for Windows API
     let operation: Vec<u16> = OsStr::new("runas").encode_wide().chain(once(0)).collect();
@@ -414,10 +446,22 @@ async fn run_elevated_process(exe_path: &Path, args: &str) -> Result<(), String>
             );
 
             // ShellExecuteW returns a value > 32 if successful
+            let result_code = result as i32;
             if result as usize > 32 {
+                log::info!("ShellExecuteW succeeded, installer launched");
                 Ok(())
             } else {
-                Err(format!("ShellExecuteW failed with code: {}", result as i32))
+                // Map common error codes
+                let error_msg = match result_code {
+                    0 => "The operating system is out of memory or resources",
+                    2 => "File not found",
+                    3 => "Path not found",
+                    5 => "Access denied - try running the client as administrator",
+                    8 => "Out of memory",
+                    31 => "No association for file type",
+                    _ => "Unknown error",
+                };
+                Err(format!("ShellExecuteW failed (code {}): {}", result_code, error_msg))
             }
         }
     })

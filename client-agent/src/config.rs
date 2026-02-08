@@ -47,7 +47,12 @@ impl Default for Config {
     fn default() -> Self {
         let default_watch_dir = dirs::download_dir()
             .unwrap_or_else(|| PathBuf::from(r"C:\Users\Public\Downloads"));
-        
+
+        // Use user's Downloads\Games folder instead of C:\Games (doesn't require admin)
+        let default_output_dir = dirs::download_dir()
+            .map(|d| d.join("Games"))
+            .unwrap_or_else(|| PathBuf::from(r"C:\Users\Public\Games"));
+
         Self {
             client: ClientConfig {
                 id: String::new(),
@@ -66,7 +71,7 @@ impl Default for Config {
                 enabled: false,
             },
             extraction: ExtractionConfig {
-                output_dir: PathBuf::from(r"C:\Games"),
+                output_dir: default_output_dir,
                 watch_dir: default_watch_dir,
                 delete_after_extract: false,
                 verify_md5: true,
