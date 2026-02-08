@@ -275,7 +275,7 @@ async fn process_single_download(
         }
     }
 
-    // Step 3: Find and run installer
+    // Step 3: Find and launch installer
     info!("Extraction complete. Looking for installer: {}", game_title);
     report_progress(server_client, download_id, "installing", 0.0, None, None, None).await?;
 
@@ -284,23 +284,23 @@ async fn process_single_download(
 
     info!("Found installer: {:?}", installer_path);
 
-    // Run silent installation
+    // Launch installer (user will interact with it)
     match run_silent_install(&installer_path).await {
         Ok(_) => {
-            info!("Installation complete: {}", game_title);
+            info!("Installer launched successfully: {}", game_title);
             report_progress(server_client, download_id, "completed", 100.0, None, None, None).await?;
 
             // Show notification
             #[cfg(windows)]
             tokio::task::spawn_blocking(move || {
                 show_notification(
-                    "Installation Complete",
-                    &format!("{} has been installed successfully!", game_title),
+                    "Installer Launched",
+                    &format!("{} installer is ready. Follow the on-screen instructions to install.", game_title),
                 );
             });
         }
         Err(e) => {
-            error!("Installation failed: {}", e);
+            error!("Failed to launch installer: {}", e);
             report_progress(
                 server_client,
                 download_id,
@@ -308,7 +308,7 @@ async fn process_single_download(
                 0.0,
                 None,
                 None,
-                Some(format!("Installation failed: {}", e)),
+                Some(format!("Failed to launch installer: {}", e)),
             ).await?;
             return Err(e.into());
         }
@@ -368,25 +368,15 @@ fn find_installer(dir: &Path) -> Result<PathBuf, String> {
 }
 
 async fn run_silent_install(installer_path: &Path) -> Result<(), String> {
-    info!("Running silent installation with elevation: {:?}", installer_path);
+    info!("Launching installer with elevation: {:?}", installer_path);
 
-    // Determine install directory (same parent as installer)
-    let install_dir = installer_path
-        .parent()
-        .unwrap_or(Path::new("C:\\Games"))
-        .to_string_lossy()
-        .to_string();
-
-    // Build command line arguments for FitGirl installer (InnoSetup)
-    let args = format!(
-        "/VERYSILENT /DIR=\"{}\" /LANG=english /NOCANCEL /NORESTART",
-        install_dir
-    );
+    // Just launch the installer with elevation - let user interact with it
+    // No silent install flags - user can see and control the installation
 
     // Run installer with UAC elevation on Windows
     #[cfg(windows)]
     {
-        run_elevated_process(installer_path, &args).await?;
+        run_elevated_process(installer_path, "").await?;
     }
 
     #[cfg(not(windows))]
