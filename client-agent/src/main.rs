@@ -781,7 +781,11 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([500.0, 400.0])
             .with_min_inner_size([450.0, 350.0])
-            .with_title("Repack Auto-Installer"),
+            .with_title("Repack Auto-Installer")
+            .with_decorations(true)     // Show window borders and title bar
+            .with_resizable(true)        // Allow resizing
+            .with_maximized(false)       // Don't start maximized
+            .with_taskbar(true),         // Show in taskbar
         ..Default::default()
     };
 
